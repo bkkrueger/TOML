@@ -1,5 +1,6 @@
 #include <iomanip>
 #include <iostream>
+#include <fstream>
 
 #include "config.cpp"
 
@@ -42,8 +43,9 @@ void print_value_summary(const Value v) {
 void try_to_set(Value& v, const std::string s) {
     try {
         std::cout << "Set value to [" << s << "]." << std::endl;
-        v.set(s);
+        v.set_from_string(s);
         print_value_summary(v);
+        std::cout << "    serialize as [" << v.serialize() << "]" << std::endl;
     } catch(ParseError& pe) {
         std::cout << "Could not compute valid Value from [" << s << "]: "
             << std::endl;
@@ -74,6 +76,29 @@ int main(int argc, char *argv[]) {
     try_to_set(v, "3.6e2");
     try_to_set(v, "9.87654321e5");
     try_to_set(v, "1.23456789E5");
+    try_to_set(v, "12345678901234567.89    # this is a comment");
+    try_to_set(v, "6.022e23");
+
+    std::string file = "yes = \"yes\" # YES\nno=0\nmaybe    =0.5\n";
+    std::cout << std::endl;
+    std::cout << "Parse [" << file << "]" << std::endl;
+    Table table;
+    table.parse_string(file);
+    std::vector<std::string> keys = table.keys();
+    for (auto it = keys.begin(); it != keys.end(); it++) {
+        std::cout << "    " << *it << " = " << table[*it] << std::endl;
+    }
+
+    file = "parameters.config";
+    std::cout << std::endl;
+    std::cout << "Parse file \"" << file << "\"" << std::endl;
+    table.parse_file(file);
+    keys = table.keys();
+    for (auto it = keys.begin(); it != keys.end(); it++) {
+        std::cout << "    " << *it << " = " << table[*it] << std::endl;
+        //std::cout << "    " << it->first << " = " << it->second.serialize()
+            //<< std::endl;
+    }
 
     return 0;
 }
