@@ -9,6 +9,13 @@ typedef std::string::const_iterator string_it;
 
 // ============================================================================
 
+class TypeError : public std::runtime_error {
+    public:
+        TypeError(std::string msg): std::runtime_error(msg) {}
+};
+
+// ============================================================================
+
 class ParseError : public std::runtime_error {
     public:
         ParseError(std::string msg): std::runtime_error(msg) {}
@@ -33,7 +40,7 @@ class Value {
 
         // --------------------------------------------------------------------
 
-        static bool is_digit(const char c) const {
+        static bool is_digit(const char c) {
             switch(c) {
                 case '0':
                 case '1':
@@ -53,7 +60,7 @@ class Value {
 
         // --------------------------------------------------------------------
 
-        static unsigned to_digit(const char c) const {
+        static unsigned to_digit(const char c) {
             switch(c) {
                 case '0':
                     return 0;
@@ -76,7 +83,12 @@ class Value {
                 case '9':
                     return 9;
                 default:
-                    throw ParseError("Character \"" +c+ "\" is not a digit.");
+                    std::string message = "Character \"";
+                    message.append(1, c);
+                    message.append("\" is not a digit.");
+                    throw ParseError(message);
+            }
+        }
 
         // --------------------------------------------------------------------
 
@@ -99,18 +111,20 @@ class Value {
             it++;
             std::string temp_string = "";
             while (it != end) {
-                if (*it == '\') {
+                if (*it == '\\') {
                     it++;
                     if (*it == '"') {
                         temp_string += "\"";
                         it++;
-                    } else if (*it == '\') {
+                    } else if (*it == '\\') {
                         temp_string += "\\";
                         it++;
                     } else {
                         // TODO -- Check the escape list for TOML
-                        throw ParseError("Unknown escape character \"\\" +
-                                *it + "\".");
+                        std::string message = "Unknown escape character \\\"";
+                        message.append(1, *it);
+                        message.append("\".");
+                        throw ParseError(message);
                     }
                 } else if (*it == '"') {
                     break;
@@ -136,11 +150,11 @@ class Value {
         // Attempt to parse the value as a boolean .  If it cannot be converted
         // to a valid boolean, raise a ParseError.
         void parse_boolean(string_it& it, const string_it& end) {
-            temp_bool;
+            bool temp_bool;
             if (std::string(it, it+4) == "true") {
                 it = it + 4;
                 temp_bool = true;
-            } else (std::string(it, it+5) == "false") {
+            } else if (std::string(it, it+5) == "false") {
                 it = it + 5;
                 temp_bool = false;
             } else {
@@ -158,6 +172,7 @@ class Value {
 
         // Attempt to parse the value as a number.  If it cannot be converted
         // to a valid number, raise a ParseError.
+        // TODO -- handle underscore separators
         void parse_number(string_it& it, const string_it& end) {
             // sign
             int sign;
@@ -167,12 +182,14 @@ class Value {
             } else if (*it == '+') {
                 sign = 1;
                 it++;
-            } else if (is_digit(it)) {
+            } else if (*it == '.' || is_digit(*it)) {
                 sign = 1;
+            } else {
+                throw ParseError("Unable to parse as a number.");
             }
             // integer part
             int ipart = 0;
-            while (it != end && is_digit(it)) {
+            while (it != end && is_digit(*it)) {
                 ipart = 10 * ipart + to_digit(*it);
                 it++;
             }
@@ -181,17 +198,19 @@ class Value {
             double shift = 0.1;
             if (it != end && *it == '.') {
                 it++;
-                while (it != end && is_digit(it)) {
-                    dpart = shift * to_digit(*it);
+                while (it != end && is_digit(*it)) {
+                    dpart += shift * to_digit(*it);
                     shift *= 0.1;
+                    it++;
                 }
             }
             // exponent (scientific notation)
             double exponent = 0;
             if (it != end && (*it == 'e' || *it == 'E')) {
                 it++;
-                while (it != end && is_digit(it)) {
+                while (it != end && is_digit(*it)) {
                     exponent = 10 * exponent + to_digit(*it);
+                    it++;
                 }
             }
             // Trailing characters
@@ -200,12 +219,14 @@ class Value {
                 throw ParseError("Trailing characters after number.");
             }
             // Construct the number
-            double abs_number = (ipart + dpart) * std::pow(10, exponent);
+            double abs_number = (static_cast<double>(ipart) + dpart) *
+                std::pow(10.0, exponent);
+            // TODO -- is this first "if" clause redundant?
             if (dpart == 0 && exponent == 0) {
-                value_as_number = sign * ipart;
+                value_as_integer = sign * ipart;
                 is_conformable_to_integer = true;
             } else if (std::floor(abs_number) == abs_number) {
-                value_as_number = sign * abs_number;
+                value_as_integer = sign * abs_number;
                 is_conformable_to_integer = true;
             }
             value_as_float = sign * abs_number;
@@ -228,27 +249,12 @@ class Value {
 
             // Choose which type to parse
             if (*it == '"') {
-                try {
-                    parse_string(it, end);
-                } catch(ParseError& pe) {
-                    throw ParseError("Unable to parse \"" + input_string +
-                            "\" to a value.");
-                }
+                parse_string(it, end);
             } else if (*it == 't' || *it == 'f') {
-                try {
-                    parse_boolean(it, end);
-                } catch(ParseError& pe) {
-                    throw ParseError("Unable to parse \"" + input_string +
-                            "\" to a value.");
-                }
+                parse_boolean(it, end);
             } else if (*it == '-' || *it == '+' || *it == '.' ||
                     is_digit(*it)) {
-                try {
-                    parse_number(it, end);
-                } catch(ParseError& pe) {
-                    throw ParseError("Unable to parse \"" + input_string +
-                            "\" to a value.");
-                }
+                parse_number(it, end);
             } else {
                 throw ParseError("Unable to parse \"" + input_string +
                         "\" to a value.");
@@ -291,6 +297,20 @@ class Value {
 
         // --------------------------------------------------------------------
 
+        void set(const std::string input_string) {
+            value_as_string = "";
+            value_as_integer = 0;
+            value_as_float = 0.0;
+            value_as_boolean = false;
+            is_conformable_to_string = false;
+            is_conformable_to_integer = false;
+            is_conformable_to_float = false;
+            is_conformable_to_boolean = false;
+            analyze(input_string);
+        }
+
+        // --------------------------------------------------------------------
+
         std::string as_string() const {
             if (is_conformable_to_string) {
                 return value_as_string;
@@ -312,8 +332,8 @@ class Value {
         // --------------------------------------------------------------------
 
         double as_float() const {
-            if (is_conformable_to_integer) {
-                return value_as_integer;
+            if (is_conformable_to_float) {
+                return value_as_float;
             } else {
                 throw TypeError("Value cannot be converted to an integer.");
             }
