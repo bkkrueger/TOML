@@ -118,8 +118,22 @@ Config::String Config::Value::parse_string(
             } else if (*it == '\\') {
                 temp_string += "\\";
                 it++;
+            } else if (*it == 'b') {
+                temp_string += "\b";
+                it++;
+            } else if (*it == 't') {
+                temp_string += "\t";
+                it++;
+            } else if (*it == 'n') {
+                temp_string += "\n";
+                it++;
+            } else if (*it == 'f') {
+                temp_string += "\f";
+                it++;
+            } else if (*it == 'r') {
+                temp_string += "\r";
+                it++;
             } else {
-                // TODO -- Check the escape list for TOML
                 std::string message = "Unknown escape character \"\\";
                 message.append(1, *it);
                 message.append("\".");
@@ -447,11 +461,23 @@ std::string Config::Value::serialize() const {
         Config::string_it end = value_as_string.end();
         std::string output = "\""; // Surround with double-quotes
         while (it != end) { // Fix escape sequences
-            // TODO -- Check the escape list for TOML
-            if (*it == '"' || *it == '\\') {
-                output.append(1, '\\');
+            if (*it == '"') {
+                output.append("\\\"");
+            } else if (*it == '\\') {
+                output.append("\\\\");
+            } else if (*it == '\b') {
+                output.append("\\b");
+            } else if (*it == '\t') {
+                output.append("\\t");
+            } else if (*it == '\n') {
+                output.append("\\n");
+            } else if (*it == '\f') {
+                output.append("\\f");
+            } else if (*it == '\r') {
+                output.append("\\f");
+            } else {
+                output.append(1, *it);
             }
-            output.append(1, *it);
             it++;
         }
         output += "\""; // Surround with double-quotes

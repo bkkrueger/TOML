@@ -79,7 +79,7 @@ int main(int argc, char *argv[]) {
     try_to_set(v, "12345678901234567.89    # this is a comment");
     try_to_set(v, "6.022e23");
 
-    std::string file = "yes = \"yes\" # YES\nno=0\nmaybe    =0.5\n";
+    std::string file = "yes = \"yes\" # YES\nno=0\nmaybe    =0.5\nwhat=\"\\\"what\\nare\\byou\\ttalking\\nabout?\\\"\"";
     std::cout << std::endl;
     std::cout << "Parse [" << file << "]" << std::endl;
     Config::Group group;
@@ -88,6 +88,8 @@ int main(int argc, char *argv[]) {
     for (auto it = keys.begin(); it != keys.end(); it++) {
         std::cout << "    " << *it << " = " << group[*it] << std::endl;
     }
+    std::cout << "what (as a string) --> " << group["what"].as_string()
+        << std::endl;
 
     file = "parameters.config";
     std::cout << std::endl;

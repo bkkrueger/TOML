@@ -145,7 +145,6 @@ namespace Config {
             // Private functions
 
             // Parsing
-            // TODO -- better method of getting valid keys
             static void consume_key(string_it& it, const string_it& end);
 
         public:
