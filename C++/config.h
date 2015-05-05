@@ -1,5 +1,8 @@
 /* A simple configuration file parser. */
 
+#ifndef CONFIG_H
+#define CONFIG_H
+
 #include <cmath>
 #include <cstdint>
 #include <iostream>
@@ -29,32 +32,54 @@ namespace Config {
     typedef double Float;
     typedef bool Boolean;
 
+    // The parsing routines, especially for Value, return the value in the
+    // desired format.  Because numbers can be either Integers, Floats, or
+    // both, we use this struct for returning Numbers.
+    typedef struct {
+        Integer integer_value;
+        Float float_value;
+        bool valid_integer;
+        bool valid_float;
+    } Number;
+
+    // A typedef that will be used a lot internally
+    typedef std::string::const_iterator string_it;
+
     // ========================================================================
 
-    class ParseError : public std::runtime_error {
+    // All errors used here inherit from ConfigError (for inheritance and
+    // catching).
+    class Error : public std::runtime_error {
         public:
-            ParseError(std::string msg): std::runtime_error(msg) {}
+            Error(std::string msg): std::runtime_error(msg) {}
     };
 
     // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-    class TypeError : public std::runtime_error {
+    class ParseError : public Error {
         public:
-            TypeError(std::string msg): std::runtime_error(msg) {}
+            ParseError(std::string msg): Error(msg) {}
     };
 
     // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-    class ValueError : public std::runtime_error {
+    class TypeError : public Error {
         public:
-            ValueError(std::string msg): std::runtime_error(msg) {}
+            TypeError(std::string msg): Error(msg) {}
+    };
+
+    // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+    class ValueError : public Error {
+        public:
+            ValueError(std::string msg): Error(msg) {}
     };
 
     // ========================================================================
 
     class Value {
         private:
-            // ----------------------------------------------------------------
+            // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
             // Internal storage
 
             // The value in different formats
@@ -69,22 +94,18 @@ namespace Config {
             bool is_conformable_to_float;
             bool is_conformable_to_boolean;
 
-            // A typedef that will be used a lot internally
-            typedef std::string::const_iterator string_it;
-
-            // ----------------------------------------------------------------
+            // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
             // Private functions
 
             // Parsing
-            void parse_string(string_it& it, const string_it end);
-            void parse_number(string_it& it, const string_it end);
-                    // TODO const std::string::const_iterator end);
-            void parse_boolean(std::string::const_iterator& it,
-                    const std::string::const_iterator end);
+            void clear();
+            String parse_string(string_it& it, const string_it& end);
+            Number parse_number(string_it& it, const string_it& end);
+            Boolean parse_boolean(string_it& it, const string_it& end);
             void analyze(const std::string input_string);
 
         public:
-            // ----------------------------------------------------------------
+            // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
             // Public functions
 
             // Constructors
@@ -106,116 +127,49 @@ namespace Config {
 
             // Output
             std::string serialize() const;
+            friend std::ostream& operator<< (
+                    std::ostream& sout, const Value& v);
     };
 
+    // ========================================================================
 
-
-
-
-
-
-
-
-    std::ostream& operator<< (std::ostream& sout, Value v) {
-        sout << v.serialize();
-        return sout;
-    }
-
-    // ============================================================================
-
-    class Table {
-
+    class Group {
         private:
+            // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+            // Internal storage
 
+            // The map that stores the key-value pairs
             std::unordered_map<std::string,Value> data_map;
 
-            // --------------------------------------------------------------------
+            // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+            // Private functions
 
+            // Parsing
             // TODO -- better method of getting valid keys
-            void consume_key(string_it& it, const string_it& end) {
-                while (it != end && (*it != ' ' && *it != '\t' && *it != '=')) {
-                    it++;
-                }
-            }
-
-            // --------------------------------------------------------------------
+            static void consume_key(string_it& it, const string_it& end);
 
         public:
+            // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+            // Public functions
 
-            // --------------------------------------------------------------------
+            // Parsing
+            void parse_string(const std::string s);
+            void parse_file(const std::string filename);
+            void parse_stream(std::istream& sin);
 
-            void parse_string(const std::string s) {
-                std::istringstream iss(s);
-                parse_stream(iss);
-            }
+            // Get the list of keys
+            std::vector<std::string> keys() const;
 
-            // --------------------------------------------------------------------
+            // Access a Value by its key
+            Value& operator[] (std::string key);
 
-            void parse_file(const std::string filename) {
-                std::ifstream fin;
-                fin.open(filename);
-                parse_stream(fin);
-                fin.close();
-            }
-
-            // --------------------------------------------------------------------
-
-            void parse_stream(std::istream& sin) {
-                std::unordered_map<std::string,Value> temp_map;
-                std::string line;
-                while(std::getline(sin,line)) {
-                    string_it key_start = line.begin();
-                    string_it end = line.end();
-                    // Strip leading whitespace
-                    consume_whitespace(key_start, end);
-                    if (key_start == end || *key_start == '#') {
-                        continue;
-                    }
-                    // Find the end of the key
-                    auto key_stop = key_start;
-                    consume_key(key_stop, end);
-                    if (key_stop == key_start) {
-                        throw ParseError("Key is empty: " + line);
-                    }
-                    if (key_stop == end) {
-                        throw ParseError("Malformed line (key only): " + line);
-                    }
-                    // Check for equal sign (and strip surrounding whitespace)
-                    auto value_start = key_stop;
-                    consume_whitespace(value_start, end);
-                    if (*value_start != '=') {
-                        throw ParseError("Malformed line (no key-value separator): "
-                                + line);
-                    }
-                    value_start++;
-                    consume_whitespace(value_start, end);
-                    // Split into key and value
-                    std::string key(key_start, key_stop);
-                    Value value(std::string(value_start,end));
-                    // Load into the map
-                    if (temp_map.find(key) != temp_map.end()) {
-                        throw ParseError("Key \"" + key + "\" multiply defined.");
-                    }
-                    temp_map.emplace(key, value);
-                }
-                data_map = temp_map;
-            }
-
-            // --------------------------------------------------------------------
-
-            std::vector<std::string> keys() const {
-                std::vector<std::string> v;
-                for (auto it = data_map.begin(); it != data_map.end(); it++) {
-                    v.push_back(it->first);
-                }
-                return v;
-            }
-
-            // --------------------------------------------------------------------
-
-            Value& operator[] (std::string key) {
-                return data_map.at(key);
-            }
-
+            // Output
+            std::string serialize() const;
+            friend std::ostream& operator<< (
+                    std::ostream& sout, const Group& g);
     };
+
+}
+
+#endif // #ifndef CONFIG_H
 

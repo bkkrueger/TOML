@@ -2,22 +2,22 @@
 #include <iostream>
 #include <fstream>
 
-#include "config.cpp"
+#include "config.h"
 
-void print_value_summary(const Value v) {
+void print_value_summary(const Config::Value v) {
     std::cout << "Summary of value:" << std::endl;
     try {
         std::string v_string = v.as_string();
         std::cout << "    Value as a string = [" << v_string << "]"
             << std::endl;
-    } catch(TypeError& te) {
+    } catch(Config::TypeError& te) {
         std::cout << "    Value is not conformable to a string." << std::endl;
     }
     try {
         int64_t v_integer = v.as_integer();
         std::cout << "    Value as an integer = [" << v_integer << "]"
             << std::endl;
-    } catch(TypeError& te) {
+    } catch(Config::TypeError& te) {
         std::cout << "    Value is not conformable to an integer."
             << std::endl;
     }
@@ -25,7 +25,7 @@ void print_value_summary(const Value v) {
         double v_float = v.as_float();
         std::cout << std::setprecision(9);
         std::cout << "    Value as a float = [" << v_float << "]" << std::endl;
-    } catch(TypeError& te) {
+    } catch(Config::TypeError& te) {
         std::cout << "    Value is not conformable to a float." << std::endl;
     }
     try {
@@ -33,20 +33,20 @@ void print_value_summary(const Value v) {
         std::cout << std::boolalpha;
         std::cout << "    Value as a boolean = [" << v_boolean << "]"
             << std::endl;
-    } catch(TypeError& te) {
+    } catch(Config::TypeError& te) {
         std::cout << "    Value is not conformable to a boolean." << std::endl;
     }
 }
 
 // ============================================================================
 
-void try_to_set(Value& v, const std::string s) {
+void try_to_set(Config::Value& v, const std::string s) {
     try {
         std::cout << "Set value to [" << s << "]." << std::endl;
         v.set_from_string(s);
         print_value_summary(v);
         std::cout << "    serialize as [" << v.serialize() << "]" << std::endl;
-    } catch(ParseError& pe) {
+    } catch(Config::ParseError& pe) {
         std::cout << "Could not compute valid Value from [" << s << "]: "
             << std::endl;
         std::cout << "    " << pe.what() << std::endl;
@@ -56,7 +56,7 @@ void try_to_set(Value& v, const std::string s) {
 // ============================================================================
 
 int main(int argc, char *argv[]) {
-    Value v;
+    Config::Value v;
     print_value_summary(v);
 
     try_to_set(v, "yes");
@@ -82,23 +82,19 @@ int main(int argc, char *argv[]) {
     std::string file = "yes = \"yes\" # YES\nno=0\nmaybe    =0.5\n";
     std::cout << std::endl;
     std::cout << "Parse [" << file << "]" << std::endl;
-    Table table;
-    table.parse_string(file);
-    std::vector<std::string> keys = table.keys();
+    Config::Group group;
+    group.parse_string(file);
+    std::vector<std::string> keys = group.keys();
     for (auto it = keys.begin(); it != keys.end(); it++) {
-        std::cout << "    " << *it << " = " << table[*it] << std::endl;
+        std::cout << "    " << *it << " = " << group[*it] << std::endl;
     }
 
     file = "parameters.config";
     std::cout << std::endl;
     std::cout << "Parse file \"" << file << "\"" << std::endl;
-    table.parse_file(file);
-    keys = table.keys();
-    for (auto it = keys.begin(); it != keys.end(); it++) {
-        std::cout << "    " << *it << " = " << table[*it] << std::endl;
-        //std::cout << "    " << it->first << " = " << it->second.serialize()
-            //<< std::endl;
-    }
+    group.parse_file(file);
+    keys = group.keys();
+    std::cout << group;
 
     return 0;
 }

@@ -2,582 +2,589 @@
 
 #include <cmath>
 #include <cstdint>
+#include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-// ============================================================================
-
-typedef std::string::const_iterator string_it;
+#include "config.h"
 
 // ============================================================================
+// General parsing functions that will be used in both Values and Tables
 
-class TypeError : public std::runtime_error {
-    public:
-        TypeError(std::string msg): std::runtime_error(msg) {}
-};
-
-// ============================================================================
-
-class ParseError : public std::runtime_error {
-    public:
-        ParseError(std::string msg): std::runtime_error(msg) {}
-};
-
-// ============================================================================
-
-class ValueError : public std::runtime_error {
-    public:
-        ValueError(std::string msg): std::runtime_error(msg) {}
-};
-
-// ============================================================================
-
-void consume_whitespace(string_it& it, const string_it& end) {
+// Advance the iterator while there is white space.
+void consume_whitespace(Config::string_it& it, const Config::string_it& end) {
     while (it != end && (*it == ' ' || *it == '\t')) {
         it++;
     }
 }
 
+// ----------------------------------------------------------------------------
+
+// Advance the iterator to the end of line (allowing for comments).  If
+// anything other than white space or comments is found, this is a ParseError.
+void consume_end_of_line(Config::string_it& it, const Config::string_it& end) {
+    consume_whitespace(it, end);
+    if (it != end && *it != '#') {
+        throw Config::ParseError("Trailing characters.");
+    }
+}
+
+// ----------------------------------------------------------------------------
+
+// Check if the character is a valid digit (0-9).  While functions for these
+// things exist, I don't want to tangle with issues of locale, so I hardcoded
+// my own.
+static bool is_digit(const char c) {
+    switch(c) {
+        case '0':
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+        case '7':
+        case '8':
+        case '9':
+            return true;
+        default:
+            return false;
+    }
+}
+
+// ----------------------------------------------------------------------------
+
+// Convert a character to a digit, or raise a ParseError if the character is
+// not equivalent to a digit.  While functions for these things exist, I don't
+// want to tangle with issues of locale, so I hardcoded my own.
+static unsigned to_digit(const char c) {
+    switch(c) {
+        case '0': return 0;
+        case '1': return 1;
+        case '2': return 2;
+        case '3': return 3;
+        case '4': return 4;
+        case '5': return 5;
+        case '6': return 6;
+        case '7': return 7;
+        case '8': return 8;
+        case '9': return 9;
+        default:
+              std::string message = "Character \"";
+              message.append(1, c);
+              message.append("\" is not a digit.");
+              throw Config::ParseError(message);
+    }
+}
+
 // ============================================================================
+// Value ______________________________________________________________________
 
-class Value {
+// Clear the Value -- erase the internal values and set it to be nonconformable
+void Config::Value::clear() {
+    // Not conformable to anything
+    is_conformable_to_string = false;
+    is_conformable_to_integer = false;
+    is_conformable_to_float = false;
+    is_conformable_to_boolean = false;
+    // Wipe the value(s)
+    value_as_string = "";
+    value_as_integer = 0;
+    value_as_float = 0.0;
+    value_as_boolean = false;
+}
 
-    private:
+// ----------------------------------------------------------------------------
 
-        // --------------------------------------------------------------------
-
-        std::string value_as_string;
-        int64_t value_as_integer;
-        double value_as_float;
-        bool value_as_boolean;
-
-        bool is_conformable_to_string;
-        bool is_conformable_to_integer;
-        bool is_conformable_to_float;
-        bool is_conformable_to_boolean;
-
-        // --------------------------------------------------------------------
-
-        static bool is_digit(const char c) {
-            switch(c) {
-                case '0':
-                case '1':
-                case '2':
-                case '3':
-                case '4':
-                case '5':
-                case '6':
-                case '7':
-                case '8':
-                case '9':
-                    return true;
-                default:
-                    return false;
-            }
-        }
-
-        // --------------------------------------------------------------------
-
-        static unsigned to_digit(const char c) {
-            switch(c) {
-                case '0': return 0;
-                case '1': return 1;
-                case '2': return 2;
-                case '3': return 3;
-                case '4': return 4;
-                case '5': return 5;
-                case '6': return 6;
-                case '7': return 7;
-                case '8': return 8;
-                case '9': return 9;
-                default:
-                    std::string message = "Character \"";
-                    message.append(1, c);
-                    message.append("\" is not a digit.");
-                    throw ParseError(message);
-            }
-        }
-
-        // --------------------------------------------------------------------
-
-        /*// Advance the iterator while it points at whitespace (space or tab)
-        // and is not yet at end.
-        void consume_whitespace(string_it& it, const string_it& end) const {
-            while (it != end && (*it == ' ' || *it == '\t')) {
-                it++;
-            }
-        }*/
-
-        // --------------------------------------------------------------------
-
-        // Attempt to parse the value as a string.  If it cannot be converted
-        // to a valid string value, raise a ParseError.
-        void parse_string(string_it& it, const string_it& end) {
-            if (*it != '"') {
-                throw ParseError("Unable to parse as a string.");
-            }
+// Attempt to parse the value as a String.  Return the String or raise a
+// ParseError if parsing fails.
+Config::String Config::Value::parse_string(
+        Config::string_it& it, const Config::string_it& end) {
+    if (*it != '"') {
+        throw Config::ParseError("Unable to parse as a string.");
+    }
+    it++;
+    Config::String temp_string = "";
+    while (it != end) {
+        if (*it == '\\') {
             it++;
-            std::string temp_string = "";
-            while (it != end) {
-                if (*it == '\\') {
-                    it++;
-                    if (*it == '"') {
-                        temp_string += "\"";
-                        it++;
-                    } else if (*it == '\\') {
-                        temp_string += "\\";
-                        it++;
-                    } else {
-                        // TODO -- Check the escape list for TOML
-                        std::string message = "Unknown escape character \"\\";
-                        message.append(1, *it);
-                        message.append("\".");
-                        throw ParseError(message);
-                    }
-                } else if (*it == '"') {
-                    break;
-                } else {
-                    temp_string += *it;
-                    it++;
-                }
-            }
-            if (*it != '"') {
-                throw ParseError("Unable to parse as a string.");
-            }
-            it++;
-            consume_whitespace(it, end);
-            if (it != end && *it != '#') {
-                throw ParseError("Trailing characters after string.");
-            }
-            value_as_string = temp_string;
-            is_conformable_to_string = true;
-        }
-
-        // --------------------------------------------------------------------
-
-        // Attempt to parse the value as a boolean .  If it cannot be converted
-        // to a valid boolean, raise a ParseError.
-        void parse_boolean(string_it& it, const string_it& end) {
-            bool temp_bool;
-            if (std::string(it, it+4) == "true") {
-                it = it + 4;
-                temp_bool = true;
-            } else if (std::string(it, it+5) == "false") {
-                it = it + 5;
-                temp_bool = false;
-            } else {
-                throw ParseError("Unable to parse as a boolean.");
-            }
-            consume_whitespace(it, end);
-            if (it != end && *it != '#') {
-                throw ParseError("Trailing characters after boolean.");
-            }
-            value_as_boolean = temp_bool;
-            is_conformable_to_boolean = true;
-        }
-
-        // --------------------------------------------------------------------
-
-        // Attempt to parse the value as a number.  If it cannot be converted
-        // to a valid number, raise a ParseError.
-        // TODO -- handle underscore separators
-        void parse_number(string_it& it, const string_it& end) {
-            // sign
-            int64_t sign;
-            if (*it == '-') {
-                sign = -1;
-                it++;
-            } else if (*it == '+') {
-                sign = 1;
-                it++;
-            } else if (*it == '.' || is_digit(*it)) {
-                sign = 1;
-            } else {
-                throw ParseError("Unable to parse as a number.");
-            }
-            // integer part
-            int64_t ipart = 0;
-            while (it != end && is_digit(*it)) {
-                ipart = 10 * ipart + to_digit(*it);
-                it++;
-            }
-            // decimal
-            double dpart = 0;
-            double shift = 0.1;
-            if (it != end && *it == '.') {
-                it++;
-                while (it != end && is_digit(*it)) {
-                    dpart += shift * to_digit(*it);
-                    shift *= 0.1;
-                    it++;
-                }
-            }
-            // exponent (scientific notation)
-            int64_t e_sign;
-            int64_t exponent = 0;
-            if (it != end && (*it == 'e' || *it == 'E')) {
-                it++;
-                if (*it == '-') {
-                    e_sign = -1;
-                    it++;
-                } else if (*it == '+') {
-                    e_sign = 1;
-                    it++;
-                } else if (is_digit(*it)) {
-                    e_sign = 1;
-                } else {
-                    throw ParseError("Invalid exponent in number.");
-                }
-                while (it != end && is_digit(*it)) {
-                    exponent = 10 * exponent + to_digit(*it);
-                    it++;
-                }
-                exponent *= e_sign;
-            }
-            // Trailing characters
-            consume_whitespace(it, end);
-            if (it != end && *it != '#') {
-                throw ParseError("Trailing characters after number.");
-            }
-            // Construct the number
-            if (dpart == 0 && exponent == 0) {
-                // This is really an integer, and may also be a float
-                int64_t as_integer = sign * ipart;
-                double as_float = static_cast<double>(as_integer);
-                if (as_integer == as_float) {
-                    value_as_float = as_float;
-                    is_conformable_to_float = true;
-                }
-                value_as_integer = sign * ipart;
-                is_conformable_to_integer = true;
-            } else {
-                // This is really a float, and may also be an integer
-                double as_float = sign * (static_cast<double>(ipart) + dpart) *
-                    std::pow(10.0, exponent);
-                int64_t as_integer = static_cast<int64_t>(as_float);
-                if (as_float == as_integer) {
-                    value_as_integer = as_integer;
-                    is_conformable_to_integer = true;
-                }
-                value_as_float = as_float;
-                is_conformable_to_float = true;
-            }
-        }
-
-        // --------------------------------------------------------------------
-
-        void analyze(const std::string input_string) {
-            string_it it = input_string.begin();
-            string_it end = input_string.end();
-
-            // Trim leading whitespace
-            consume_whitespace(it, end);
-
-            // Ensure there is something (non-comment) left in the string
-            if (it == end || *it == '#') {
-                throw ParseError("Empty value.");
-            }
-
-            // Choose which type to parse
             if (*it == '"') {
-                parse_string(it, end);
-            } else if (*it == 't' || *it == 'f') {
-                parse_boolean(it, end);
-            } else if (*it == '-' || *it == '+' || *it == '.' ||
-                    is_digit(*it)) {
-                parse_number(it, end);
+                temp_string += "\"";
+                it++;
+            } else if (*it == '\\') {
+                temp_string += "\\";
+                it++;
             } else {
-                throw ParseError("Unable to parse \"" + input_string +
-                        "\" to a value.");
+                // TODO -- Check the escape list for TOML
+                std::string message = "Unknown escape character \"\\";
+                message.append(1, *it);
+                message.append("\".");
+                throw Config::ParseError(message);
             }
+        } else if (*it == '"') {
+            break;
+        } else {
+            temp_string += *it;
+            it++;
         }
+    }
+    if (*it != '"') {
+        throw Config::ParseError("Unable to parse as a string.");
+    }
+    it++;
+    return temp_string;
+}
 
-        // --------------------------------------------------------------------
+// ----------------------------------------------------------------------------
 
-    protected:
+// Attempt to parse the value as a Boolean.  Return the Boolean or raise a
+// ParseError if parsing fails.
+Config::Boolean Config::Value::parse_boolean(
+        Config::string_it& it, const Config::string_it& end) {
+    Config::Boolean temp_bool;
+    if (std::string(it, it+4) == "true") {
+        it = it + 4;
+        temp_bool = true;
+    } else if (std::string(it, it+5) == "false") {
+        it = it + 5;
+        temp_bool = false;
+    } else {
+        throw Config::ParseError("Unable to parse as a boolean.");
+    }
+    return temp_bool;
+}
 
-        // --------------------------------------------------------------------
+// ----------------------------------------------------------------------------
 
-    public:
-
-        // --------------------------------------------------------------------
-
-        Value():
-            value_as_string(""),
-            is_conformable_to_string(false),
-            value_as_integer(0),
-            is_conformable_to_integer(false),
-            value_as_float(0.0),
-            is_conformable_to_float(false),
-            value_as_boolean(false),
-            is_conformable_to_boolean(false) {}
-
-        // --------------------------------------------------------------------
-
-        Value(const std::string input_string):
-            value_as_string(""),
-            is_conformable_to_string(false),
-            value_as_integer(0),
-            is_conformable_to_integer(false),
-            value_as_float(0.0),
-            is_conformable_to_float(false),
-            value_as_boolean(false),
-            is_conformable_to_boolean(false) {
-            analyze(input_string);
+// Attempt to parse the value as a number.  Return the Number or raise a
+// ParseError if parsing fails.
+// TODO -- handle underscore separators
+Config::Number Config::Value::parse_number(
+        Config::string_it& it, const Config::string_it& end) {
+    Config::Number temp_number;
+    temp_number.valid_integer = false;
+    temp_number.integer_value = 0;
+    temp_number.valid_float = false;
+    temp_number.float_value = 0.0;
+    // sign
+    Config::Integer sign;
+    if (*it == '-') {
+        sign = -1;
+        it++;
+    } else if (*it == '+') {
+        sign = 1;
+        it++;
+    } else if (*it == '.' || is_digit(*it)) {
+        sign = 1;
+    } else {
+        throw Config::ParseError("Unable to parse as a number.");
+    }
+    // integer part
+    Config::Integer ipart = 0;
+    while (it != end && is_digit(*it)) {
+        ipart = 10 * ipart + to_digit(*it);
+        it++;
+    }
+    // decimal
+    Config::Float dpart = 0;
+    Config::Float shift = 0.1;
+    if (it != end && *it == '.') {
+        it++;
+        while (it != end && is_digit(*it)) {
+            dpart += shift * to_digit(*it);
+            shift *= 0.1;
+            it++;
         }
-
-        // --------------------------------------------------------------------
-
-        void set_from_string(const std::string input_string) {
-            value_as_string = "";
-            is_conformable_to_string = false;
-            value_as_integer = 0;
-            is_conformable_to_integer = false;
-            value_as_float = 0.0;
-            is_conformable_to_float = false;
-            value_as_boolean = false;
-            is_conformable_to_boolean = false;
-            analyze(input_string);
+    }
+    // exponent (scientific notation)
+    Config::Integer e_sign;
+    Config::Integer exponent = 0;
+    if (it != end && (*it == 'e' || *it == 'E')) {
+        it++;
+        if (*it == '-') {
+            e_sign = -1;
+            it++;
+        } else if (*it == '+') {
+            e_sign = 1;
+            it++;
+        } else if (is_digit(*it)) {
+            e_sign = 1;
+        } else {
+            throw Config::ParseError("Invalid exponent in number.");
         }
-
-        // --------------------------------------------------------------------
-
-        void set(const std::string s) {
-            value_as_string = s;
-            is_conformable_to_string = true;
-            value_as_integer = 0;
-            is_conformable_to_integer = false;
-            value_as_float = 0.0;
-            is_conformable_to_float = false;
-            value_as_boolean = false;
-            is_conformable_to_boolean = false;
+        while (it != end && is_digit(*it)) {
+            exponent = 10 * exponent + to_digit(*it);
+            it++;
         }
-
-        // --------------------------------------------------------------------
-
-        void set(const int64_t i) {
-            value_as_string = "";
-            is_conformable_to_string = false;
-            value_as_integer = i;
-            is_conformable_to_integer = true;
-            value_as_float = static_cast<double>(i);
-            is_conformable_to_float = true;
-            value_as_boolean = false;
-            is_conformable_to_boolean = false;
+        exponent *= e_sign;
+    }
+    // Construct the number
+    if (dpart == 0 && exponent == 0) {
+        // This is really an integer, and may also be a float
+        Config::Integer as_integer = sign * ipart;
+        Config::Float as_float = static_cast<Config::Float>(as_integer);
+        if (as_integer == as_float) {
+            temp_number.float_value = as_float;
+            temp_number.valid_float = true;
         }
+        temp_number.integer_value = as_integer;
+        temp_number.valid_integer = true;
+    } else {
+        // This is really a float, and may also be an integer
+        Config::Float as_float = sign *
+            (static_cast<Config::Float>(ipart) + dpart) *
+            std::pow(10.0, exponent);
+        Config::Integer as_integer = static_cast<Config::Integer>(as_float);
+        if (as_float == as_integer) {
+            temp_number.integer_value = as_integer;
+            temp_number.valid_integer = true;
+        }
+        temp_number.float_value = as_float;
+        temp_number.valid_float = true;
+    }
+    return temp_number;
+}
 
-        // --------------------------------------------------------------------
+// ----------------------------------------------------------------------------
 
-        void set(const double d) {
-            value_as_string = "";
-            is_conformable_to_string = false;
-            if (std::abs(d) == d) {
-                value_as_integer = d;
-                is_conformable_to_integer = true;
-            } else {
-                value_as_integer = 0;
-                is_conformable_to_integer = false;
+// Analyze the given input string.  If it is a valid value, set the Value to
+// have the appropriate internal values and flags.  Otherwise, raise a
+// ParseError.
+void Config::Value::analyze(const std::string input_string) {
+    // Clear the current internal values and flags
+    clear();
+
+    // Get the iterators for the input string
+    Config::string_it it = input_string.begin();
+    const Config::string_it end = input_string.end();
+
+    // Trim leading whitespace
+    consume_whitespace(it, end);
+
+    // Ensure there is something (non-comment) left in the string
+    if (it == end || *it == '#') {
+        throw Config::ParseError("Empty value.");
+    }
+
+    // Choose which type to parse
+    if (*it == '"') {
+        // This is either a String or nothing
+        Config::String temp_string = parse_string(it, end);
+        consume_end_of_line(it, end);
+        // Save it
+        value_as_string = temp_string;
+        is_conformable_to_string = true;
+    } else if (*it == 't' || *it == 'f') {
+        // This is either a Boolean or nothing
+        Config::Boolean temp_boolean = parse_boolean(it, end);
+        consume_end_of_line(it, end);
+        // Save it
+        value_as_boolean = temp_boolean;
+        is_conformable_to_boolean = true;
+    } else if (*it == '-' || *it == '+' || *it == '.' ||
+            is_digit(*it)) {
+        // This is either an Integer, a Float, both, or nothing
+        Config::Number temp_number = parse_number(it, end);
+        consume_end_of_line(it, end);
+        // Save it
+        value_as_integer = temp_number.integer_value;
+        value_as_float = temp_number.float_value;
+        is_conformable_to_integer = temp_number.valid_integer;
+        is_conformable_to_float = temp_number.valid_float;
+    } else {
+        // This is nothing
+        throw Config::ParseError("Unable to parse \"" + input_string +
+                "\" to a value.");
+    }
+}
+
+// ----------------------------------------------------------------------------
+
+// Construct an empty Value
+// -- note: yes, an initialization list would be slightly more efficient.  But
+//    considering all my internal data is basic types, the performance
+//    difference is, for all intents and purposes, zero.  This is easier to
+//    write and to maintain.
+Config::Value::Value() {
+    clear();
+}
+
+// ----------------------------------------------------------------------------
+
+// Construct a Value by analyzing an input string
+Config::Value::Value(const std::string input_string) {
+    analyze(input_string);
+}
+
+// ----------------------------------------------------------------------------
+
+// Set the Value by analyzing an input string
+void Config::Value::set_from_string(const std::string input_string) {
+    analyze(input_string);
+}
+
+// ----------------------------------------------------------------------------
+
+// Set the Value from a String
+// TODO -- Verify that this simple method works; I may have to surround the
+//         String with double quotes and run it through analyze().
+void Config::Value::set(const Config::String s) {
+    clear();
+    value_as_string = s;
+    is_conformable_to_string = true;
+}
+
+// ----------------------------------------------------------------------------
+
+// Set the Value from an Integer (may also be conformable to a Float)
+void Config::Value::set(const Config::Integer i) {
+    clear();
+    value_as_integer = i;
+    is_conformable_to_integer = true;
+    Config::Float temp_float = static_cast<Config::Float>(i);
+    if (temp_float == i) {
+        value_as_float = temp_float;
+        is_conformable_to_float = true;
+    }
+}
+
+// ----------------------------------------------------------------------------
+
+// Set the Value from a Float (may also be conformable to an Integer)
+void Config::Value::set(const Config::Float f) {
+    clear();
+    value_as_float = f;
+    is_conformable_to_float = true;
+    Config::Integer temp_integer = static_cast<Config::Integer>(f);
+    if (temp_integer == f) {
+        value_as_integer = temp_integer;
+        is_conformable_to_integer = true;
+    }
+}
+
+// ----------------------------------------------------------------------------
+
+// Set the Value from a Boolean
+void Config::Value::set(const Config::Boolean b) {
+    clear();
+    value_as_boolean = b;
+    is_conformable_to_boolean = true;
+}
+
+// ----------------------------------------------------------------------------
+
+// Return the Value as a String
+Config::String Config::Value::as_string() const {
+    if (is_conformable_to_string) {
+        return value_as_string;
+    } else {
+        throw Config::TypeError("Value cannot be converted to a string.");
+    }
+}
+
+// ----------------------------------------------------------------------------
+
+// Return the Value as an Integer
+Config::Integer Config::Value::as_integer() const {
+    if (is_conformable_to_integer) {
+        return value_as_integer;
+    } else {
+        throw Config::TypeError("Value cannot be converted to an integer.");
+    }
+}
+
+// ----------------------------------------------------------------------------
+
+// Return the Value as a Float
+Config::Float Config::Value::as_float() const {
+    if (is_conformable_to_float) {
+        return value_as_float;
+    } else {
+        throw Config::TypeError("Value cannot be converted to an integer.");
+    }
+}
+
+// ----------------------------------------------------------------------------
+
+// Return the Value as a Boolean
+Config::Boolean Config::Value::as_boolean() const {
+    if (is_conformable_to_boolean) {
+        return value_as_boolean;
+    } else {
+        throw Config::TypeError("Value cannot be converted to an boolean.");
+    }
+}
+
+// ----------------------------------------------------------------------------
+
+// Convert the Value to a std::string as if writing a new config file
+std::string Config::Value::serialize() const {
+    if (is_conformable_to_boolean) {
+        // Write as a Boolean
+        if (value_as_boolean) {
+            return "true";
+        } else {
+            return "false";
+        }
+    } else if (is_conformable_to_integer) {
+        // Write as an Integer (anything conformable to both Integer and Float
+        // will appear as an Integer because Integers go before Floats)
+        std::stringstream ss;
+        ss << value_as_integer;
+        return ss.str();
+    } else if (is_conformable_to_float) {
+        // Write as a Float
+        std::stringstream ss;
+        ss << std::setprecision(15) << value_as_float;
+        return ss.str();
+    } else if (is_conformable_to_string) {
+        // Write as a String
+        Config::string_it it = value_as_string.begin();
+        Config::string_it end = value_as_string.end();
+        std::string output = "\""; // Surround with double-quotes
+        while (it != end) { // Fix escape sequences
+            // TODO -- Check the escape list for TOML
+            if (*it == '"' || *it == '\\') {
+                output.append(1, '\\');
             }
-            value_as_float = d;
-            is_conformable_to_float = true;
-            value_as_boolean = false;
-            is_conformable_to_boolean = false;
+            output.append(1, *it);
+            it++;
         }
+        output += "\""; // Surround with double-quotes
+        return output;
+    } else {
+        // Not actually a valid Value
+        throw Config::ValueError("Value cannot be serialized.");
+    }
+}
 
-        // --------------------------------------------------------------------
+// ----------------------------------------------------------------------------
 
-        void set(const bool b) {
-            value_as_string = "";
-            is_conformable_to_string = false;
-            value_as_integer = 0;
-            is_conformable_to_integer = false;
-            value_as_float = 0.0;
-            is_conformable_to_float = false;
-            value_as_boolean = b;
-            is_conformable_to_boolean = true;
-        }
-
-        // --------------------------------------------------------------------
-
-        std::string as_string() const {
-            if (is_conformable_to_string) {
-                return value_as_string;
-            } else {
-                throw TypeError("Value cannot be converted to a string.");
-            }
-        }
-
-        // --------------------------------------------------------------------
-
-        int64_t as_integer() const {
-            if (is_conformable_to_integer) {
-                return value_as_integer;
-            } else {
-                throw TypeError("Value cannot be converted to an integer.");
-            }
-        }
-
-        // --------------------------------------------------------------------
-
-        double as_float() const {
-            if (is_conformable_to_float) {
-                return value_as_float;
-            } else {
-                throw TypeError("Value cannot be converted to an integer.");
-            }
-        }
-
-        // --------------------------------------------------------------------
-
-        bool as_boolean() const {
-            if (is_conformable_to_boolean) {
-                return value_as_boolean;
-            } else {
-                throw TypeError("Value cannot be converted to an boolean.");
-            }
-        }
-
-        // --------------------------------------------------------------------
-
-        std::string serialize() const {
-            if (is_conformable_to_boolean) {
-                if (value_as_boolean) {
-                    return "true";
-                } else {
-                    return "false";
-                }
-            } else if (is_conformable_to_integer) {
-                std::stringstream ss;
-                ss << value_as_integer;
-                return ss.str();
-            } else if (is_conformable_to_float) {
-                std::stringstream ss;
-                ss << std::setprecision(15) << value_as_float;
-                return ss.str();
-            } else if (is_conformable_to_string) {
-                string_it it = value_as_string.begin();
-                string_it end = value_as_string.end();
-                std::string output = "\"";
-                while (it != end) {
-                    // TODO -- Check the escape list for TOML
-                    if (*it == '"' || *it == '\\') {
-                        output.append(1, '\\');
-                    }
-                    output.append(1, *it);
-                    it++;
-                }
-                output += "\"";
-                return output;
-            } else {
-                throw ValueError("Value cannot be serialized.");
-            }
-        }
-
-};
-
-std::ostream& operator<< (std::ostream& sout, Value v) {
+// Write a Value to a stream
+std::ostream& Config::operator<< (std::ostream& sout, const Config::Value& v) {
     sout << v.serialize();
     return sout;
 }
 
 // ============================================================================
+// Group ______________________________________________________________________
 
-class Table {
+// Advance the iterator across a valid key.  Raise a ParseError if there is no
+// valid key present at the iterator.
+// TODO -- better method of getting valid keys
+void Config::Group::consume_key(
+        Config::string_it& it, const Config::string_it& end) {
+    while (it != end && (*it != ' ' && *it != '\t' && *it != '=')) {
+        it++;
+    }
+}
 
-    private:
+// ----------------------------------------------------------------------------
 
-        std::unordered_map<std::string,Value> data_map;
+// Parse a Group from an input string
+void Config::Group::parse_string(const std::string s) {
+    // Load into a stringstream and parse that stream
+    std::istringstream iss(s);
+    parse_stream(iss);
+}
 
-        // --------------------------------------------------------------------
+// ----------------------------------------------------------------------------
 
-        // TODO -- better method of getting valid keys
-        void consume_key(string_it& it, const string_it& end) {
-            while (it != end && (*it != ' ' && *it != '\t' && *it != '=')) {
-                it++;
-            }
+// Parse a Group from a file (specified by the file name)
+void Config::Group::parse_file(const std::string filename) {
+    // Open the file as a filestream and parse that stream
+    std::ifstream fin;
+    fin.open(filename);
+    parse_stream(fin);
+    fin.close();    // Don't forget to close the file!
+}
+
+// ----------------------------------------------------------------------------
+
+// Parse a Group from a stream.  A failure results in a ParseError, but leaves
+// the original Group unchanged.
+void Config::Group::parse_stream(std::istream& sin) {
+    // Use a temporary map in case the parsing fails mid-stream.
+    std::unordered_map<std::string,Config::Value> temp_map;
+    std::string line;
+    // Loop over each line of the stream
+    while(std::getline(sin,line)) {
+        Config::string_it key_start = line.begin();
+        const Config::string_it end = line.end();
+        // Strip leading whitespace
+        consume_whitespace(key_start, end);
+        if (key_start == end || *key_start == '#') {
+            // If the line is empty or is comment-only, skip it
+            continue;
         }
-
-        // --------------------------------------------------------------------
-
-    public:
-
-        // --------------------------------------------------------------------
-
-        void parse_string(const std::string s) {
-            std::istringstream iss(s);
-            parse_stream(iss);
+        // Find the end of the key
+        auto key_stop = key_start;
+        consume_key(key_stop, end);
+        if (key_stop == key_start) {
+            throw ParseError("Malformed line (empty key): " + line);
         }
-
-        // --------------------------------------------------------------------
-
-        void parse_file(const std::string filename) {
-            std::ifstream fin;
-            fin.open(filename);
-            parse_stream(fin);
-            fin.close();
+        if (key_stop == end) {
+            throw ParseError("Malformed line (key only): " + line);
         }
-
-        // --------------------------------------------------------------------
-
-        void parse_stream(std::istream& sin) {
-            std::unordered_map<std::string,Value> temp_map;
-            std::string line;
-            while(std::getline(sin,line)) {
-                string_it key_start = line.begin();
-                string_it end = line.end();
-                // Strip leading whitespace
-                consume_whitespace(key_start, end);
-                if (key_start == end || *key_start == '#') {
-                    continue;
-                }
-                // Find the end of the key
-                auto key_stop = key_start;
-                consume_key(key_stop, end);
-                if (key_stop == key_start) {
-                    throw ParseError("Key is empty: " + line);
-                }
-                if (key_stop == end) {
-                    throw ParseError("Malformed line (key only): " + line);
-                }
-                // Check for equal sign (and strip surrounding whitespace)
-                auto value_start = key_stop;
-                consume_whitespace(value_start, end);
-                if (*value_start != '=') {
-                    throw ParseError("Malformed line (no key-value separator): "
-                            + line);
-                }
-                value_start++;
-                consume_whitespace(value_start, end);
-                // Split into key and value
-                std::string key(key_start, key_stop);
-                Value value(std::string(value_start,end));
-                // Load into the map
-                if (temp_map.find(key) != temp_map.end()) {
-                    throw ParseError("Key \"" + key + "\" multiply defined.");
-                }
-                temp_map.emplace(key, value);
-            }
-            data_map = temp_map;
+        // Check for equal sign (and strip surrounding whitespace)
+        auto value_start = key_stop;
+        consume_whitespace(value_start, end);
+        if (*value_start != '=') {
+            throw ParseError("Malformed line (no key-value separator): "
+                    + line);
         }
-
-        // --------------------------------------------------------------------
-
-        std::vector<std::string> keys() const {
-            std::vector<std::string> v;
-            for (auto it = data_map.begin(); it != data_map.end(); it++) {
-                v.push_back(it->first);
-            }
-            return v;
+        value_start++;
+        consume_whitespace(value_start, end);
+        // Split into key and value
+        std::string key(key_start, key_stop);
+        Config::Value value(std::string(value_start, end));
+        // Load into the map
+        if (temp_map.find(key) != temp_map.end()) {
+            throw ParseError("Key \"" + key + "\" multiply defined.");
         }
+        temp_map.emplace(key, value);
+    }
+    data_map = temp_map;
+}
 
-        // --------------------------------------------------------------------
+// ----------------------------------------------------------------------------
 
-        Value& operator[] (std::string key) {
-            return data_map.at(key);
-        }
+// Return the set of keys in the Group
+std::vector<std::string> Config::Group::keys() const {
+    std::vector<std::string> v;
+    for (auto it = data_map.begin(); it != data_map.end(); it++) {
+        v.push_back(it->first);
+    }
+    return v;
+}
 
-};
+// ----------------------------------------------------------------------------
+
+// Access a Value according to its key within the Group
+Config::Value& Config::Group::operator[] (std::string key) {
+    return data_map.at(key);
+}
+
+// ----------------------------------------------------------------------------
+
+// Convert the Group to a std::string as if writing a new config file
+std::string Config::Group::serialize() const {
+    std::stringstream ss("");
+    for (auto it = data_map.begin(); it != data_map.end(); it++) {
+        ss << it->first << " = " << it->second << std::endl;
+    }
+    return ss.str();
+}
+
+// ----------------------------------------------------------------------------
+
+// Write a Group to a stream
+std::ostream& Config::operator<< (std::ostream& sout, const Config::Group& g) {
+    sout << g.serialize();
+    return sout;
+}
 
