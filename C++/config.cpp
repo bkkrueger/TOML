@@ -24,17 +24,6 @@ void consume_whitespace(Config::string_it& it, const Config::string_it& end) {
 
 // ----------------------------------------------------------------------------
 
-// Advance the iterator to the end of line (allowing for comments).  If
-// anything other than white space or comments is found, this is a ParseError.
-void consume_end_of_line(Config::string_it& it, const Config::string_it& end) {
-    consume_whitespace(it, end);
-    if (it != end && *it != '#') {
-        throw Config::ParseError("Trailing characters.");
-    }
-}
-
-// ----------------------------------------------------------------------------
-
 // Check if the character is a valid digit (0-9).  While functions for these
 // things exist, I don't want to tangle with issues of locale, so I hardcoded
 // my own.
@@ -268,13 +257,10 @@ Config::Number Config::Value::parse_number(
 // Analyze the given input string.  If it is a valid value, set the Value to
 // have the appropriate internal values and flags.  Otherwise, raise a
 // ParseError.
-void Config::Value::analyze(const std::string input_string) {
+void Config::Value::analyze(
+        Config::string_it& it, const Config::string_it& end) {
     // Clear the current internal values and flags
     clear();
-
-    // Get the iterators for the input string
-    Config::string_it it = input_string.begin();
-    const Config::string_it end = input_string.end();
 
     // Trim leading whitespace
     consume_whitespace(it, end);
@@ -288,14 +274,12 @@ void Config::Value::analyze(const std::string input_string) {
     if (*it == '"') {
         // This is either a String or nothing
         Config::String temp_string = parse_string(it, end);
-        consume_end_of_line(it, end);
         // Save it
         value_as_string = temp_string;
         is_conformable_to_string = true;
     } else if (*it == 't' || *it == 'f') {
         // This is either a Boolean or nothing
         Config::Boolean temp_boolean = parse_boolean(it, end);
-        consume_end_of_line(it, end);
         // Save it
         value_as_boolean = temp_boolean;
         is_conformable_to_boolean = true;
@@ -303,7 +287,6 @@ void Config::Value::analyze(const std::string input_string) {
             is_digit(*it)) {
         // This is either an Integer, a Float, both, or nothing
         Config::Number temp_number = parse_number(it, end);
-        consume_end_of_line(it, end);
         // Save it
         value_as_integer = temp_number.integer_value;
         value_as_float = temp_number.float_value;
@@ -311,7 +294,7 @@ void Config::Value::analyze(const std::string input_string) {
         is_conformable_to_float = temp_number.valid_float;
     } else {
         // This is nothing
-        throw Config::ParseError("Unable to parse \"" + input_string +
+        throw Config::ParseError("Unable to parse \"" + std::string(it,end) +
                 "\" to a value.");
     }
 }
@@ -331,21 +314,28 @@ Config::Value::Value() {
 
 // Construct a Value by analyzing an input string
 Config::Value::Value(const std::string input_string) {
-    analyze(input_string);
+    auto it = input_string.begin();
+    analyze(it, input_string.end());
+}
+
+// ----------------------------------------------------------------------------
+
+// Construct a Value by analyzing an input string from iterators
+Config::Value::Value(Config::string_it& it, const Config::string_it& end) {
+    analyze(it, end);
 }
 
 // ----------------------------------------------------------------------------
 
 // Set the Value by analyzing an input string
 void Config::Value::set_from_string(const std::string input_string) {
-    analyze(input_string);
+    auto it = input_string.begin();
+    analyze(it, input_string.end());
 }
 
 // ----------------------------------------------------------------------------
 
 // Set the Value from a String
-// TODO -- Verify that this simple method works; I may have to surround the
-//         String with double quotes and run it through analyze().
 void Config::Value::set(const Config::String s) {
     clear();
     value_as_string = s;
@@ -511,6 +501,19 @@ void Config::Group::consume_key(
 
 // ----------------------------------------------------------------------------
 
+// Advance the iterator to the end of the line or the start of a line comment,
+// verifying that nothing but whitespace and a line comment remains.
+void Config::Group::consume_to_eol(
+        Config::string_it& it, const Config::string_it& end) {
+    consume_whitespace(it, end);
+    if (it != end && *it != '#') {
+        throw Config::ParseError("Trailing characters: " +
+                std::string(it, end));
+    }
+}
+
+// ----------------------------------------------------------------------------
+
 // Parse a Group from an input string
 void Config::Group::parse_string(const std::string s) {
     // Load into a stringstream and parse that stream
@@ -535,9 +538,14 @@ void Config::Group::parse_file(const std::string filename) {
 // the original Group unchanged.
 void Config::Group::parse_stream(std::istream& sin) {
     // Use a temporary map in case the parsing fails mid-stream.
-    std::unordered_map<std::string,Config::Value> temp_map;
+    std::unordered_map<std::string,Config::Value> temp_scalar_map;
+    std::unordered_map<std::string,std::vector<Config::Value>> temp_array_map;
     std::string line;
     // Loop over each line of the stream
+    // TODO -- Currently Value handles trailing whitespace and comments.  I
+    //         should change the structure so that Value only parses the value
+    //         itself, and Group deals with trailing whitespace and comments.
+    //         This will make it easier to parse arrays of Values.
     while(std::getline(sin,line)) {
         Config::string_it key_start = line.begin();
         const Config::string_it end = line.end();
@@ -556,25 +564,48 @@ void Config::Group::parse_stream(std::istream& sin) {
         if (key_stop == end) {
             throw ParseError("Malformed line (key only): " + line);
         }
+        // Extract the key
+        std::string key(key_start, key_stop);
+        if (temp_scalar_map.find(key) != temp_scalar_map.end() ||
+                temp_array_map.find(key) != temp_array_map.end()) {
+            throw ParseError("Key \"" + key + "\" multiply defined.");
+        }
         // Check for equal sign (and strip surrounding whitespace)
-        auto value_start = key_stop;
-        consume_whitespace(value_start, end);
-        if (*value_start != '=') {
+        auto value_it = key_stop;
+        consume_whitespace(value_it, end);
+        if (*value_it != '=') {
             throw ParseError("Malformed line (no key-value separator): "
                     + line);
         }
-        value_start++;
-        consume_whitespace(value_start, end);
+        value_it++;
+        consume_whitespace(value_it, end);
         // Split into key and value
-        std::string key(key_start, key_stop);
-        Config::Value value(std::string(value_start, end));
-        // Load into the map
-        if (temp_map.find(key) != temp_map.end()) {
-            throw ParseError("Key \"" + key + "\" multiply defined.");
+        if (*value_it == '[') {
+            value_it++;
+            std::vector<Config::Value> value_list;
+            while (true) {
+                value_list.push_back(Config::Value(value_it, end));
+                consume_whitespace(value_it, end);
+                if (*value_it == ']') {
+                    value_it++;
+                    break;
+                } else if (*value_it == ',') {
+                    value_it++;
+                } else {
+                    throw Config::ParseError("Invalid array of Values");
+                }
+            }
+            consume_to_eol(value_it, end);
+            // TODO -- Do I want to enforce single-type-only arrays?
+            temp_array_map.emplace(key, value_list);
+        } else {
+            Config::Value value(value_it, end);
+            consume_to_eol(value_it, end);
+            temp_scalar_map.emplace(key, value);
         }
-        temp_map.emplace(key, value);
     }
-    data_map = temp_map;
+    scalar_map = temp_scalar_map;
+    array_map = temp_array_map;
 }
 
 // ----------------------------------------------------------------------------
@@ -582,7 +613,7 @@ void Config::Group::parse_stream(std::istream& sin) {
 // Return the set of keys in the Group
 std::vector<std::string> Config::Group::keys() const {
     std::vector<std::string> v;
-    for (auto it = data_map.begin(); it != data_map.end(); it++) {
+    for (auto it = scalar_map.begin(); it != scalar_map.end(); it++) {
         v.push_back(it->first);
     }
     return v;
@@ -592,7 +623,7 @@ std::vector<std::string> Config::Group::keys() const {
 
 // Access a Value according to its key within the Group
 Config::Value& Config::Group::operator[] (std::string key) {
-    return data_map.at(key);
+    return scalar_map.at(key);
 }
 
 // ----------------------------------------------------------------------------
@@ -600,8 +631,21 @@ Config::Value& Config::Group::operator[] (std::string key) {
 // Convert the Group to a std::string as if writing a new config file
 std::string Config::Group::serialize() const {
     std::stringstream ss("");
-    for (auto it = data_map.begin(); it != data_map.end(); it++) {
-        ss << it->first << " = " << it->second << std::endl;
+    for (auto s_it = scalar_map.begin(); s_it != scalar_map.end(); s_it++) {
+        ss << s_it->first << " = " << s_it->second << std::endl;
+    }
+    for (auto a_it = array_map.begin(); a_it != array_map.end(); a_it++) {
+        ss << a_it->first << " = [";
+        std::vector<Config::Value> v = a_it->second;
+        for (unsigned index = 0; index < v.size(); index++) {
+            ss << v[index];
+            if (index == v.size() - 1) {
+                ss << ']';
+            } else {
+                ss << ',';
+            }
+        }
+        ss << std::endl;
     }
     return ss.str();
 }

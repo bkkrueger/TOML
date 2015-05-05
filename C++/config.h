@@ -102,7 +102,6 @@ namespace Config {
             String parse_string(string_it& it, const string_it& end);
             Number parse_number(string_it& it, const string_it& end);
             Boolean parse_boolean(string_it& it, const string_it& end);
-            void analyze(const std::string input_string);
 
         public:
             // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -110,9 +109,11 @@ namespace Config {
 
             // Constructors
             Value();
+            Value(string_it& it, const string_it& end);
             Value(const std::string input_string);
 
             // Setters
+            void analyze(string_it& it, const string_it& end);
             void set_from_string(const std::string input_string);
             void set(const String s);
             void set(const Integer i);
@@ -138,14 +139,17 @@ namespace Config {
             // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
             // Internal storage
 
-            // The map that stores the key-value pairs
-            std::unordered_map<std::string,Value> data_map;
+            // The map for key-value pairs
+            std::unordered_map<std::string,Value> scalar_map;
+            // The map for key-array pairs
+            std::unordered_map<std::string,std::vector<Value>> array_map;
 
             // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
             // Private functions
 
             // Parsing
             static void consume_key(string_it& it, const string_it& end);
+            static void consume_to_eol(string_it& it, const string_it& end);
 
         public:
             // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -

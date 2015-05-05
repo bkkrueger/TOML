@@ -73,7 +73,7 @@ int main(int argc, char *argv[]) {
     try_to_set(v, "3.141592654");
     try_to_set(v, "-2.718281828");
     try_to_set(v, "123456789.0");
-    try_to_set(v, "3.6e2");
+    try_to_set(v, "   3.6e2");
     try_to_set(v, "9.87654321e5");
     try_to_set(v, "1.23456789E5");
     try_to_set(v, "12345678901234567.89    # this is a comment");
