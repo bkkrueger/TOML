@@ -23,9 +23,8 @@ boolean_variable = false
 
 # Planned Features
 
-1. Lists: `key = [value1, value2, value3]`
-2. Groups (collect sets of key-value pairs together to avoid name collisions).
-3. Nested groups (subgroups within other groups).
-4. Lists of groups.
-5. Datetime values.
+1. Nested groups (subgroups within other groups).
+2. Lists of groups.
+3. Datetime values.
+4. Additional TOML features (e.g. underscores in numbers)
 
