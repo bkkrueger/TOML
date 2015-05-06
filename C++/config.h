@@ -193,9 +193,9 @@ namespace Config {
             // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
             // Internal storage
 
-            // The map for key-value pairs
+            // The map for (key,value) pairs
             std::unordered_map<std::string,Value> scalar_map;
-            // The map for key-array pairs
+            // The map for (key,value array) pairs
             std::unordered_map<std::string,ValueArray> array_map;
 
             // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -

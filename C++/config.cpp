@@ -314,7 +314,7 @@ Config::Value::Value() {
 
 // Construct a Value by analyzing an input string
 Config::Value::Value(const std::string input_string) {
-    auto it = input_string.begin();
+    Config::string_it it = input_string.begin();
     analyze(it, input_string.end());
 }
 
@@ -329,7 +329,7 @@ Config::Value::Value(Config::string_it& it, const Config::string_it& end) {
 
 // Set the Value by analyzing an input string
 void Config::Value::set_from_string(const std::string input_string) {
-    auto it = input_string.begin();
+    Config::string_it it = input_string.begin();
     analyze(it, input_string.end());
 }
 
@@ -717,61 +717,64 @@ void Config::Group::parse_stream(std::istream& sin) {
     //         itself, and Group deals with trailing whitespace and comments.
     //         This will make it easier to parse arrays of Values.
     while(std::getline(sin,line)) {
-        Config::string_it key_start = line.begin();
+        Config::string_it start = line.begin();
         const Config::string_it end = line.end();
         // Strip leading whitespace
-        consume_whitespace(key_start, end);
-        if (key_start == end || *key_start == '#') {
+        consume_whitespace(start, end);
+        if (start == end || *start == '#') {
             // If the line is empty or is comment-only, skip it
             continue;
-        }
-        // Find the end of the key
-        auto key_stop = key_start;
-        consume_key(key_stop, end);
-        if (key_stop == key_start) {
-            throw ParseError("Malformed line (empty key): " + line);
-        }
-        if (key_stop == end) {
-            throw ParseError("Malformed line (key only): " + line);
-        }
-        // Extract the key
-        std::string key(key_start, key_stop);
-        if (temp_scalar_map.find(key) != temp_scalar_map.end() ||
-                temp_array_map.find(key) != temp_array_map.end()) {
-            throw ParseError("Key \"" + key + "\" multiply defined.");
-        }
-        // Check for equal sign (and strip surrounding whitespace)
-        auto value_it = key_stop;
-        consume_whitespace(value_it, end);
-        if (*value_it != '=') {
-            throw ParseError("Malformed line (no key-value separator): "
-                    + line);
-        }
-        value_it++;
-        consume_whitespace(value_it, end);
-        // Split into key and value
-        if (*value_it == '[') {
-            value_it++;
-            Config::ValueArray value_list;
-            while (true) {
-                value_list.add(Config::Value(value_it, end));
-                consume_whitespace(value_it, end);
-                if (*value_it == ']') {
-                    value_it++;
-                    break;
-                } else if (*value_it == ',') {
-                    value_it++;
-                } else {
-                    throw Config::ParseError("Invalid array of Values");
-                }
-            }
-            consume_to_eol(value_it, end);
-            // TODO -- Do I want to enforce single-type-only arrays?
-            temp_array_map.emplace(key, value_list);
         } else {
-            Config::Value value(value_it, end);
-            consume_to_eol(value_it, end);
-            temp_scalar_map.emplace(key, value);
+            // This is assumed to be a key-value line
+            Config::string_it key_start = start;
+            // Find the end of the key
+            Config::string_it key_stop = key_start;
+            consume_key(key_stop, end);
+            if (key_stop == key_start) {
+                throw ParseError("Malformed line (empty key): " + line);
+            }
+            if (key_stop == end) {
+                throw ParseError("Malformed line (key only): " + line);
+            }
+            // Extract the key
+            std::string key(key_start, key_stop);
+            if (temp_scalar_map.find(key) != temp_scalar_map.end() ||
+                    temp_array_map.find(key) != temp_array_map.end()) {
+                throw ParseError("Key \"" + key + "\" multiply defined.");
+            }
+            // Check for equal sign (and strip surrounding whitespace)
+            Config::string_it value_it = key_stop;
+            consume_whitespace(value_it, end);
+            if (*value_it != '=') {
+                throw ParseError("Malformed line (no key-value separator): "
+                        + line);
+            }
+            value_it++;
+            consume_whitespace(value_it, end);
+            // Split into key and value
+            if (*value_it == '[') {
+                value_it++;
+                Config::ValueArray value_list;
+                while (true) {
+                    value_list.add(Config::Value(value_it, end));
+                    consume_whitespace(value_it, end);
+                    if (*value_it == ']') {
+                        value_it++;
+                        break;
+                    } else if (*value_it == ',') {
+                        value_it++;
+                    } else {
+                        throw Config::ParseError("Invalid array of Values");
+                    }
+                }
+                consume_to_eol(value_it, end);
+                // TODO -- Do I want to enforce single-type-only arrays?
+                temp_array_map.emplace(key, value_list);
+            } else {
+                Config::Value value(value_it, end);
+                consume_to_eol(value_it, end);
+                temp_scalar_map.emplace(key, value);
+            }
         }
     }
     scalar_map = temp_scalar_map;
@@ -838,17 +841,6 @@ std::string Config::Group::serialize() const {
     }
     for (auto a_it = array_map.begin(); a_it != array_map.end(); a_it++) {
         ss << a_it->first << " = " << a_it->second << std::endl;
-        /*ss << a_it->first << " = [";
-        std::vector<Config::Value> v = a_it->second;
-        for (unsigned index = 0; index < v.size(); index++) {
-            ss << v[index];
-            if (index == v.size() - 1) {
-                ss << ']';
-            } else {
-                ss << ',';
-            }
-        }
-        ss << std::endl;*/
     }
     return ss.str();
 }
