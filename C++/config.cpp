@@ -12,13 +12,54 @@
 
 #include "config.h"
 
+typedef Config::string_it string_it;
+
 // ============================================================================
-// General parsing functions that will be used in both Values and Tables
+// General parsing functions
 
 // Advance the iterator while there is white space.
-void consume_whitespace(Config::string_it& it, const Config::string_it& end) {
+void consume_whitespace(string_it& it, const string_it& end) {
     while (it != end && (*it == ' ' || *it == '\t')) {
         it++;
+    }
+}
+
+// ----------------------------------------------------------------------------
+
+// Advance the iterator if the character matches the iterator; otherwise raise
+// an error.
+void consume_character(const char c, string_it& it, const string_it& end) {
+    if (it == end) {
+        throw Config::ParserError("No character to consume.");
+    } else if (*it == c) {
+        it++;
+    } else {
+        std::string message = "Consume character mismatch: '";
+        message.append(1, c);
+        message.append("' != '");
+        message.append(1, *it);
+        message.append("'.");
+        throw Config::ParseError(message);
+    }
+}
+
+// ----------------------------------------------------------------------------
+
+// Advance the iterator to the end of the line if the iterator points to the
+// start of a comment
+void consume_comment(string_it& it, const string_it& end) {
+    consume_character(Table::comment, it, end);
+    it = end;
+}
+
+// ----------------------------------------------------------------------------
+
+// Advance to the end of the line (ensuring that there are no trailing
+// characters beyond whitespace or a line comment)
+void consume_to_eol(string_it& it, const string_it& end) {
+    consume_whitespace(it, end);
+    if (it != end) {
+        consume_comment(it, end);
     }
 }
 
@@ -28,21 +69,19 @@ void consume_whitespace(Config::string_it& it, const Config::string_it& end) {
 // things exist, I don't want to tangle with issues of locale, so I hardcoded
 // my own.
 static bool is_digit(const char c) {
-    switch(c) {
-        case '0':
-        case '1':
-        case '2':
-        case '3':
-        case '4':
-        case '5':
-        case '6':
-        case '7':
-        case '8':
-        case '9':
-            return true;
-        default:
-            return false;
-    }
+    static const std::string digits("0123456789");
+    return (digits.find(c) != std::string::npos);
+}
+
+// ----------------------------------------------------------------------------
+
+// Check if the character is a valid letter (a-zA-Z).  While functions for
+// these things exist, I don't want to tangle with issues of locale, so I
+// hardcoded my own.
+static bool is_letter(const char c) {
+    static const std::string letters(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    return (letters.find(c) != std::string::npos);
 }
 
 // ----------------------------------------------------------------------------
@@ -70,6 +109,74 @@ static unsigned to_digit(const char c) {
     }
 }
 
+// ----------------------------------------------------------------------------
+
+// Advance the iterator across a key and return the key
+std::string analyze_key(string_it& it, const string_it& end) {
+    if (*it == '"') {
+        return analyze_quoted_key(it, end);
+    } else {
+        return analyze_bare_key(it end);
+    }
+}
+
+// ----------------------------------------------------------------------------
+
+// Advance the iterator across a quoted key and return the key
+std::string analyze_quoted_key(string_it& it, const string_it& end) {
+    // Quoted keys follow the same rules as String values, so we can just
+    // analyze it as a value and return the String if a valid String results
+    Config::Value v;
+    try {
+        v(it, end);
+    } catch (Config::ParseError& err) {
+        throw Config::ParseError("Could not parse quoted key.");
+    }
+    if (!v.is_valid_string()) {
+        throw Config::ParseError("Could not parse quoted key.");
+    }
+    std::string s = v.as_string();
+    if (s.empty()) {
+        throw Config::ParseError("Cannot have an empty quoted key.");
+    }
+    return v.as_string();
+}
+
+// ----------------------------------------------------------------------------
+
+// Advance the iterator across a bare key and return the key
+std::string analyze_bare_key(string_it& it, const string_it& end) {
+    std::string key("");
+    while (it != end &&
+            (is_digit(*it) || is_letter(*it) || *it == '_' || *it == '-')) {
+        key.append(1, *it);
+        it++;
+    }
+    if (key.empty()) {
+        throw ParseError("Empty bare key.");
+    }
+    return key;
+}
+
+// ----------------------------------------------------------------------------
+
+// Advance the iterator across a table name, and return the table name as a
+// path of keys
+std::vector<std::string> analyze_table_name(
+        string_it& it, const string_it& end) {
+    std::vector<std::string> path;
+    consume_whitespace();
+    path.push_back(analyze_key(it, end));
+    consume_whitespace();
+    while (*it == '.') {
+        it++;
+        consume_whitespace();
+        path.push_back(analyze_key(it, end));
+        consume_whitespace();
+    }
+    return path;
+}
+
 // ============================================================================
 // Value ______________________________________________________________________
 
@@ -92,7 +199,7 @@ void Config::Value::clear() {
 // Attempt to parse the value as a String.  Return the String or raise a
 // ParseError if parsing fails.
 Config::String Config::Value::parse_string(
-        Config::string_it& it, const Config::string_it& end) {
+        string_it& it, const string_it& end) {
     if (*it != '"') {
         throw Config::ParseError("Unable to parse as a string.");
     }
@@ -147,7 +254,7 @@ Config::String Config::Value::parse_string(
 // Attempt to parse the value as a Boolean.  Return the Boolean or raise a
 // ParseError if parsing fails.
 Config::Boolean Config::Value::parse_boolean(
-        Config::string_it& it, const Config::string_it& end) {
+        string_it& it, const string_it& end) {
     Config::Boolean temp_bool;
     if (std::string(it, it+4) == "true") {
         it = it + 4;
@@ -167,7 +274,7 @@ Config::Boolean Config::Value::parse_boolean(
 // ParseError if parsing fails.
 // TODO -- handle underscore separators
 Config::Number Config::Value::parse_number(
-        Config::string_it& it, const Config::string_it& end) {
+        string_it& it, const string_it& end) {
     Config::Number temp_number;
     temp_number.valid_integer = false;
     temp_number.integer_value = 0;
@@ -257,8 +364,7 @@ Config::Number Config::Value::parse_number(
 // Analyze the given input string.  If it is a valid value, set the Value to
 // have the appropriate internal values and flags.  Otherwise, raise a
 // ParseError.
-void Config::Value::analyze(
-        Config::string_it& it, const Config::string_it& end) {
+void Config::Value::analyze(string_it& it, const string_it& end) {
     // Clear the current internal values and flags
     clear();
 
@@ -314,14 +420,14 @@ Config::Value::Value() {
 
 // Construct a Value by analyzing an input string
 Config::Value::Value(const std::string input_string) {
-    Config::string_it it = input_string.begin();
+    string_it it = input_string.begin();
     analyze(it, input_string.end());
 }
 
 // ----------------------------------------------------------------------------
 
 // Construct a Value by analyzing an input string from iterators
-Config::Value::Value(Config::string_it& it, const Config::string_it& end) {
+Config::Value::Value(string_it& it, const string_it& end) {
     analyze(it, end);
 }
 
@@ -329,7 +435,7 @@ Config::Value::Value(Config::string_it& it, const Config::string_it& end) {
 
 // Set the Value by analyzing an input string
 void Config::Value::set_from_string(const std::string input_string) {
-    Config::string_it it = input_string.begin();
+    string_it it = input_string.begin();
     analyze(it, input_string.end());
 }
 
@@ -471,8 +577,8 @@ std::string Config::Value::serialize() const {
         return ss.str();
     } else if (is_conformable_to_string) {
         // Write as a String
-        Config::string_it it = value_as_string.begin();
-        Config::string_it end = value_as_string.end();
+        string_it it = value_as_string.begin();
+        string_it end = value_as_string.end();
         std::string output = "\""; // Surround with double-quotes
         while (it != end) { // Fix escape sequences
             if (*it == '"') {
@@ -657,35 +763,35 @@ std::ostream& Config::operator<< (
 }
 
 // ============================================================================
-// Group ______________________________________________________________________
+// Table ______________________________________________________________________
 
-// Advance the iterator across a valid key.  Raise a ParseError if there is no
-// valid key present at the iterator.
-// TODO -- better method of getting valid keys
-void Config::Group::consume_key(
-        Config::string_it& it, const Config::string_it& end) {
-    while (it != end && (*it != ' ' && *it != '\t' && *it != '=')) {
-        it++;
+// Find a subtable from a path.  Create the subtable if it does not exist
+// (including all intermediate subtables)
+Table& Config::Table::get_table(
+        const std::vector<std::string> path, const bool create) {
+    Table* current_table = this;
+    for (auto it = path.begin(); it != path.end(); it++) {
+        if (create && !current_table->has(*it)) {
+            // if create is false, we won't add the new table and get_table()
+            // below will generate the appropriate error for a missing key
+            current_table->add(*it, Table());
+        }
+        current_table = &current_table->get_table(*it);
     }
+    return *current_table;
 }
 
 // ----------------------------------------------------------------------------
 
-// Advance the iterator to the end of the line or the start of a line comment,
-// verifying that nothing but whitespace and a line comment remains.
-void Config::Group::consume_to_eol(
-        Config::string_it& it, const Config::string_it& end) {
-    consume_whitespace(it, end);
-    if (it != end && *it != '#') {
-        throw Config::ParseError("Trailing characters: " +
-                std::string(it, end));
-    }
+// Find a subtable from a string.  Create the subtable if it does not
+Table& Config::Table::get_table(const std::string path, const bool create) {
+    return get_table(analyze_table_name(path), create);
 }
 
 // ----------------------------------------------------------------------------
 
-// Parse a Group from an input string
-void Config::Group::parse_string(const std::string s) {
+// Parse a Table from an input string
+void Config::Table::parse_string(const std::string s) {
     // Load into a stringstream and parse that stream
     std::istringstream iss(s);
     parse_stream(iss);
@@ -693,8 +799,8 @@ void Config::Group::parse_string(const std::string s) {
 
 // ----------------------------------------------------------------------------
 
-// Parse a Group from a file (specified by the file name)
-void Config::Group::parse_file(const std::string filename) {
+// Parse a Table from a file (specified by the file name)
+void Config::Table::parse_file(const std::string filename) {
     // Open the file as a filestream and parse that stream
     std::ifstream fin;
     fin.open(filename);
@@ -704,76 +810,67 @@ void Config::Group::parse_file(const std::string filename) {
 
 // ----------------------------------------------------------------------------
 
-// Parse a Group from a stream.  A failure results in a ParseError, but leaves
-// the original Group unchanged.
-void Config::Group::parse_stream(std::istream& sin) {
+// Parse a Table from a stream.  A failure results in a ParseError, but leaves
+// the original Table unchanged.
+void Config::Table::parse_stream(std::istream& sin) {
+    Table* current_table = this;
     // Use a temporary map in case the parsing fails mid-stream.
     std::unordered_map<std::string,Config::Value> temp_scalar_map;
     std::unordered_map<std::string,Config::ValueArray> temp_array_map;
+    std::unordered_map<std::string,Config::Table> temp_table_map;
     std::string line;
     // Loop over each line of the stream
-    // TODO -- Currently Value handles trailing whitespace and comments.  I
-    //         should change the structure so that Value only parses the value
-    //         itself, and Group deals with trailing whitespace and comments.
-    //         This will make it easier to parse arrays of Values.
     while(std::getline(sin,line)) {
-        Config::string_it start = line.begin();
-        const Config::string_it end = line.end();
+        string_it it = line.begin();
+        const string_it end = line.end();
         // Strip leading whitespace
-        consume_whitespace(start, end);
-        if (start == end || *start == '#') {
+        consume_whitespace(it, end);
+        // What kind of line is it?
+        if (it == end || *it == comment) {
             // If the line is empty or is comment-only, skip it
             continue;
+        } else if (*it == '[') {
+            // This is the start of a new Table
+            consume_character('[', it, end);
+            std::vector<std::string> path = analyze_table_name(it, end);
+            consume_character(']', it, end);
+            consume_to_eol(it, end);
+            // TODO -- verify that the key does not already exist (as a Table,
+            //         Value, or ValueArray) --> not even as a Table, because
+            //         the TOML standard does not allow re-entry of tables
+            current_table = &(this->get_table(path));
         } else {
-            // This is assumed to be a key-value line
-            Config::string_it key_start = start;
-            // Find the end of the key
-            Config::string_it key_stop = key_start;
-            consume_key(key_stop, end);
-            if (key_stop == key_start) {
-                throw ParseError("Malformed line (empty key): " + line);
-            }
-            if (key_stop == end) {
-                throw ParseError("Malformed line (key only): " + line);
-            }
-            // Extract the key
-            std::string key(key_start, key_stop);
-            if (temp_scalar_map.find(key) != temp_scalar_map.end() ||
-                    temp_array_map.find(key) != temp_array_map.end()) {
-                throw ParseError("Key \"" + key + "\" multiply defined.");
-            }
-            // Check for equal sign (and strip surrounding whitespace)
-            Config::string_it value_it = key_stop;
-            consume_whitespace(value_it, end);
-            if (*value_it != '=') {
-                throw ParseError("Malformed line (no key-value separator): "
-                        + line);
-            }
-            value_it++;
-            consume_whitespace(value_it, end);
-            // Split into key and value
-            if (*value_it == '[') {
-                value_it++;
-                Config::ValueArray value_list;
-                while (true) {
-                    value_list.add(Config::Value(value_it, end));
-                    consume_whitespace(value_it, end);
-                    if (*value_it == ']') {
-                        value_it++;
-                        break;
-                    } else if (*value_it == ',') {
-                        value_it++;
-                    } else {
-                        throw Config::ParseError("Invalid array of Values");
+            // This is a key pair
+            std::string key = analyze_key(it, end);
+            // TODO -- verify that the key does not already exist (as a Table,
+            //         Value, or ValueArray)
+            consume_whitespace(it, end);
+            consume_character('=', it, end);
+            if (*it == '[') {
+                // This is a ValueArray
+                Config::ValueArray va;
+                consume_character('[', it, end);
+                consume_whitespace(it, end);
+                while (*it != ']') {
+                    va.add(Config::Value(it, end));
+                    consume_whitespace();
+                    if (*it == ',') {
+                        consume_character(',', it, end);
+                        consume_whitespace(it, end);
+                    } else if (*it != ']') {
+                        throw Config::ParseError("Malformed array of values.");
                     }
                 }
-                consume_to_eol(value_it, end);
-                // TODO -- Do I want to enforce single-type-only arrays?
-                temp_array_map.emplace(key, value_list);
+                consume_character(']', it, end);
+                consume_to_eol(it, end);
+                current_table->add(key, va);
+                // TODO -- the TOML standard allows an extra terminating comma
+                // before the closing square bracket; does my method allow?
             } else {
-                Config::Value value(value_it, end);
-                consume_to_eol(value_it, end);
-                temp_scalar_map.emplace(key, value);
+                // This is a Value
+                Config::Value v(it, end);
+                consume_to_eol(it, end);
+                current_table->add(key, v);
             }
         }
     }
@@ -783,8 +880,8 @@ void Config::Group::parse_stream(std::istream& sin) {
 
 // ----------------------------------------------------------------------------
 
-// Return the set of keys to scalars in the Group
-std::vector<std::string> Config::Group::scalar_keys() const {
+// Return the set of keys to scalars in the Table
+std::vector<std::string> Config::Table::scalar_keys() const {
     std::vector<std::string> v;
     for (auto it = scalar_map.begin(); it != scalar_map.end(); it++) {
         v.push_back(it->first);
@@ -794,8 +891,8 @@ std::vector<std::string> Config::Group::scalar_keys() const {
 
 // ----------------------------------------------------------------------------
 
-// Return the set of keys to arrays in the Group
-std::vector<std::string> Config::Group::array_keys() const {
+// Return the set of keys to arrays in the Table
+std::vector<std::string> Config::Table::array_keys() const {
     std::vector<std::string> v;
     for (auto it = array_map.begin(); it != array_map.end(); it++) {
         v.push_back(it->first);
@@ -805,8 +902,19 @@ std::vector<std::string> Config::Group::array_keys() const {
 
 // ----------------------------------------------------------------------------
 
-// Return the set of all keys in the Group
-std::vector<std::string> Config::Group::all_keys() const {
+// Return the set of keys to tables in the Table
+std::vector<std::string> Config::Table::table_keys() const {
+    std::vector<std::string> v;
+    for (auto it = table_map.begin(); it != table_map.end(); it++) {
+        v.push_back(it->first);
+    }
+    return v;
+}
+
+// ----------------------------------------------------------------------------
+
+// Return the set of all keys in the Table
+std::vector<std::string> Config::Table::all_keys() const {
     std::vector<std::string> v;
     for (auto it = scalar_map.begin(); it != scalar_map.end(); it++) {
         v.push_back(it->first);
@@ -819,22 +927,29 @@ std::vector<std::string> Config::Group::all_keys() const {
 
 // ----------------------------------------------------------------------------
 
-// Access a Value according to its key within the Group
-Config::Value& Config::Group::get_scalar(const std::string key) {
+// Access a Value according to its key within the Table
+Config::Value& Config::Table::get_scalar(const std::string key) {
     return scalar_map.at(key);
 }
 
 // ----------------------------------------------------------------------------
 
-// Access a ValueArray according to its key within the Group
-Config::ValueArray& Config::Group::get_array(const std::string key) {
+// Access a ValueArray according to its key within the Table
+Config::ValueArray& Config::Table::get_array(const std::string key) {
     return array_map.at(key);
 }
 
 // ----------------------------------------------------------------------------
 
-// Convert the Group to a std::string as if writing a new config file
-std::string Config::Group::serialize() const {
+// Access a Table according to its key within the Table
+Config::Table& Config::Table::get_table(const std::string key) {
+    return table_map.at(key);
+}
+
+// ----------------------------------------------------------------------------
+
+// Convert the Table to a std::string as if writing a new config file
+std::string Config::Table::serialize() const {
     std::stringstream ss("");
     for (auto s_it = scalar_map.begin(); s_it != scalar_map.end(); s_it++) {
         ss << s_it->first << " = " << s_it->second << std::endl;
@@ -847,9 +962,9 @@ std::string Config::Group::serialize() const {
 
 // ----------------------------------------------------------------------------
 
-// Write a Group to a stream
-std::ostream& Config::operator<< (std::ostream& sout, const Config::Group& g) {
-    sout << g.serialize();
+// Write a Table to a stream
+std::ostream& Config::operator<< (std::ostream& sout, const Config::Table& t) {
+    sout << t.serialize();
     return sout;
 }
 

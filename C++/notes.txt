@@ -1,0 +1,167 @@
+comment marker <-- '#'
+current table <-- *this
+Loop over lines
+    it <-- beginning of line
+    end <-- end of line (constant)
+    consume whitespace
+    if (it == end)  -- this is a blank line
+        advance loop to next line
+    else if (*it == comment marker) -- this is a comment-only line
+        advance loop to next line
+    else if (*it == '[') -- this is a table header
+        consume the '['
+        analyze the table path
+        consume the ']
+        consume to end-of-line or comment marker
+        current table <-- table pointed to by table path
+    else -- this is a key pair
+        analyze the key
+        if the key exists in the current table
+            error
+        consume whitespace
+        consume the '='
+        consume whitespace
+        if (*it == '[') -- this is an array of values
+            consume '['
+            consume whitespace
+            while (*it != ']')
+                analyze the value
+                consume whitespace
+                if (*it == ',') -- another value is coming
+                    consume the ','
+                    consume whitespace
+                else if (*it != ']') -- invalid
+                    error
+            consume the ']'
+            consume to end-of-line or comment marker
+            insert the (key, array) pair into the current table
+        else -- this is a scalar value
+            analyze the value
+            consume to end-of-line or comment market
+            insert the (key, value) pair into the current table
+
+ ==============================================================================
+
+consume whitspace:
+    take an iterator at the start of where you want to analyze, and a constant
+        iterator to the end of the line
+    while (*it == ' ' or *it == '\t') -- these are whitespace
+        it++
+
+ ==============================================================================
+
+consume a character
+    take an iterator to the start of where you want to analyze, a constant
+        iterator to the end of the line, and a constant character
+    if (*it == character)
+        it++
+    else
+        error
+
+ ==============================================================================
+
+consume comment
+    take an iterator to the start of where you want to analyze, a constant
+        iterator to the end of the line, and a constant comment marker
+    consume comment marker
+    advance it to end
+
+ ==============================================================================
+
+consume to end-of-line or comment market
+    take an iterator to the start of where you want to analyze, a constant
+        iterator to the end of the line, and a constant comment marker
+    consume whitespace
+    if (it != end)
+        consume comment
+
+ ==============================================================================
+
+analyze key
+    take an iterator to the start of where you want to analyze and a constant
+        iterator to the end of the line
+    if (*it == '"')
+        analyze quoted key
+    else
+        analyze bare key
+
+ ==============================================================================
+
+analyze quoted key
+    take an iterator to the start of where you want to analyze and a constant
+        iterator to the end of the line
+    note -- quoted keys follow same rules as strings
+    ask Value to parse from it to end
+    if Value is a valid String
+        return the Value as a String
+    else
+        error
+
+ ==============================================================================
+
+analyze bare key
+    take an iterator to the start of where you want to analyze and a constant
+        iterator to the end of the line
+    start with empty key
+    while (*it is a digit, letter, '_', or '-')
+        append *it to key
+        it++
+    if key is still empty
+        error
+    return key
+
+ ==============================================================================
+
+analyze table name
+    take an iterator to the start of where you want to analyze and a constant
+        iterator to the end of the line
+    set path to empty vector of keys
+    consume whitespace
+    while true
+        analyze key -- if there is no valid key, analyze key will give an error
+                    -- this structure requires at least one key
+        append key to path
+        consume whitespace
+        if (*it == '.') -- another key is coming
+            it++
+            consume whitespace
+        else if (it == end or *it == ']') -- done
+            break out of loop
+        else -- invalid
+            error
+    return path
+
+ ==============================================================================
+
+find table from path
+    take path (vector of keys)
+    note -- do not need current table; all paths are defined from root, which
+        is the analyzing table (*this)
+    note -- a function like this would be useful for access, but without
+        creating a new table if it does not exist; thus have an private
+        get_or_create_table that takes vector of keys and a public get_table
+        that takes a string
+    current table <-- root
+    loop over keys in path
+        if key not in current table
+            create new subtable of current table, indexed by key
+        current table <-- table pointed to by key
+    return current table
+
+ ==============================================================================
+
+public get table
+    take string
+    analyze table name to path
+    private get_table
+
+ ==============================================================================
+
+private get table
+    take path (vector of keys)
+    current table <-- root
+    loop over keys in path
+        if key not in current table
+            error
+        current table <-- table pointed to by key
+    return current table

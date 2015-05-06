@@ -42,7 +42,7 @@ namespace Config {
         bool valid_float;
     } Number;
 
-    // A typedef that will be used a lot internally
+    // Some typedefs that will be used a lot internally
     typedef std::string::const_iterator string_it;
 
     // ========================================================================
@@ -188,24 +188,24 @@ namespace Config {
 
     // ========================================================================
 
-    class Group {
+    class Table {
         private:
             // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
             // Internal storage
 
-            // The map for (key,value) pairs
+            // The map for (key, value) pairs
             std::unordered_map<std::string,Value> scalar_map;
-            // The map for (key,value array) pairs
+            // The map for (key, value array) pairs
             std::unordered_map<std::string,ValueArray> array_map;
-
-            // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-            // Private functions
-
-            // Parsing
-            static void consume_key(string_it& it, const string_it& end);
-            static void consume_to_eol(string_it& it, const string_it& end);
+            // The map for (key, table) pairs
+            std::unordered_map<std::string,Table> table_map;
 
         public:
+            // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+            // Public storage
+
+            static const char comment = '#';
+
             // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
             // Public functions
 
@@ -214,19 +214,43 @@ namespace Config {
             void parse_file(const std::string filename);
             void parse_stream(std::istream& sin);
 
+            // Add an element
+            void add(std::string key, Value& v);
+            void add(std::string key, ValueArray& va);
+            void add(std::string key, Table& t);
+
             // Get the list of keys
             std::vector<std::string> all_keys() const;
             std::vector<std::string> scalar_keys() const;
             std::vector<std::string> array_keys() const;
+            std::vector<std::string> table_keys() const;
 
-            // Access a Value by its key
+            // Does the key exist in the table?
+            // TODO -- should be recursive or not?
+            // TODO -- adding should not be recursive so that a file cannot
+            //         have a key pair like table.subtable.key = "value"
+            bool has(const std::string path) const;
+            bool has(const std::vector<std::string> path) const;
+            // TODO -- Should I have a method to tell whether a key is a Value,
+            //         ValueArray, or Table?
+
+            // Access an element by its key
+            // TODO -- The get_table method will recurse down into the
+            //         structure to get the appropriate element.  I should
+            //         modify get_scalar and get_array to do the same (they
+            //         will assume that the last element in the path is the
+            //         name of the scalar or array they want).
             Value& get_scalar(const std::string key);
             ValueArray& get_array(const std::string key);
+            Table& get_table(const std::string path, const bool create=true);
+            Table& get_table(
+                    const std::vector<std::string> path,
+                    const bool create=true);
 
             // Output
             std::string serialize() const;
             friend std::ostream& operator<< (
-                    std::ostream& sout, const Group& g);
+                    std::ostream& sout, const Table& g);
     };
 
 }
