@@ -84,24 +84,26 @@ int main(int argc, char *argv[]) {
     std::cout << "Parse [" << file << "]" << std::endl;
     Config::Group group;
     group.parse_string(file);
-    std::vector<std::string> keys = group.scalar_keys();
-    for (auto it = keys.begin(); it != keys.end(); it++) {
-        std::cout << "    " << *it << " = " << group.get_scalar(*it)
-            << std::endl;
-    }
-    keys = group.array_keys();
-    for (auto it = keys.begin(); it != keys.end(); it++) {
-        std::cout << "    " << *it << " = " << group.get_array(*it)
-            << std::endl;
-    }
+    std::cout << group;
     std::cout << "what (as a string) --> "
         << group.get_scalar("what").as_string() << std::endl;
+    try {
+        std::cout << "who --> " << group.get_scalar("who") << std::endl;
+    } catch (std::out_of_range& err) {
+        std::cout << "key \"who\" does not exist" << std::endl;
+    }
 
     file = "parameters.config";
     std::cout << std::endl;
     std::cout << "Parse file \"" << file << "\"" << std::endl;
     group.parse_file(file);
     std::cout << group;
+
+    std::cout << std::endl;
+    std::cout << "Access of specific members:" << std::endl;
+    std::cout << "    float2 -- > " << group.get_scalar("float2") << std::endl;
+    std::cout << "    array_var --> " << group.get_array("array_var")
+        << std::endl;
 
     return 0;
 }
