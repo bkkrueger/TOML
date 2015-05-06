@@ -84,18 +84,23 @@ int main(int argc, char *argv[]) {
     std::cout << "Parse [" << file << "]" << std::endl;
     Config::Group group;
     group.parse_string(file);
-    std::vector<std::string> keys = group.keys();
+    std::vector<std::string> keys = group.scalar_keys();
     for (auto it = keys.begin(); it != keys.end(); it++) {
-        std::cout << "    " << *it << " = " << group[*it] << std::endl;
+        std::cout << "    " << *it << " = " << group.get_scalar(*it)
+            << std::endl;
     }
-    std::cout << "what (as a string) --> " << group["what"].as_string()
-        << std::endl;
+    keys = group.array_keys();
+    for (auto it = keys.begin(); it != keys.end(); it++) {
+        std::cout << "    " << *it << " = " << group.get_array(*it)
+            << std::endl;
+    }
+    std::cout << "what (as a string) --> "
+        << group.get_scalar("what").as_string() << std::endl;
 
     file = "parameters.config";
     std::cout << std::endl;
     std::cout << "Parse file \"" << file << "\"" << std::endl;
     group.parse_file(file);
-    keys = group.keys();
     std::cout << group;
 
     return 0;

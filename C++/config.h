@@ -126,10 +126,64 @@ namespace Config {
             Float as_float() const;
             Boolean as_boolean() const;
 
+            // Type
+            bool is_valid_string() const;
+            bool is_valid_integer() const;
+            bool is_valid_float() const;
+            bool is_valid_boolean() const;
+
             // Output
             std::string serialize() const;
             friend std::ostream& operator<< (
                     std::ostream& sout, const Value& v);
+    };
+
+    // ========================================================================
+
+    class ValueArray {
+        private:
+            // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+            // Internal storage
+
+            // Vector to hold all the Values
+            std::vector<Value> array;
+
+            // Are the values available in the different formats?
+            bool is_conformable_to_string;
+            bool is_conformable_to_integer;
+            bool is_conformable_to_float;
+            bool is_conformable_to_boolean;
+
+        public:
+            // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+            // Public functions
+
+            // Constructors
+            ValueArray();
+
+            // Size of the array
+            unsigned size() const;
+
+            // Add an element
+            void add(const Value v);
+
+            // Remove an element
+            void remove(const unsigned index);
+            void clear();
+
+            // Access an element
+            Value at(const unsigned index) const;
+
+            // Convert to vector of a specific type
+            std::vector<String> as_string() const;
+            std::vector<Integer> as_integer() const;
+            std::vector<Float> as_float() const;
+            std::vector<Boolean> as_boolean() const;
+
+            // Output
+            std::string serialize() const;
+            friend std::ostream& operator<< (
+                    std::ostream& sout, const ValueArray& v);
     };
 
     // ========================================================================
@@ -142,7 +196,7 @@ namespace Config {
             // The map for key-value pairs
             std::unordered_map<std::string,Value> scalar_map;
             // The map for key-array pairs
-            std::unordered_map<std::string,std::vector<Value>> array_map;
+            std::unordered_map<std::string,ValueArray> array_map;
 
             // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
             // Private functions
@@ -161,10 +215,13 @@ namespace Config {
             void parse_stream(std::istream& sin);
 
             // Get the list of keys
-            std::vector<std::string> keys() const;
+            std::vector<std::string> all_keys() const;
+            std::vector<std::string> scalar_keys() const;
+            std::vector<std::string> array_keys() const;
 
             // Access a Value by its key
-            Value& operator[] (std::string key);
+            Value& get_scalar(const std::string key);
+            ValueArray& get_array(const std::string key);
 
             // Output
             std::string serialize() const;

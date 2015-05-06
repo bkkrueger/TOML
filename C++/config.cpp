@@ -425,6 +425,30 @@ Config::Boolean Config::Value::as_boolean() const {
 
 // ----------------------------------------------------------------------------
 
+bool Config::Value::is_valid_string() const {
+    return is_conformable_to_string;
+}
+
+// ----------------------------------------------------------------------------
+
+bool Config::Value::is_valid_integer() const {
+    return is_conformable_to_integer;
+}
+
+// ----------------------------------------------------------------------------
+
+bool Config::Value::is_valid_float() const {
+    return is_conformable_to_float;
+}
+
+// ----------------------------------------------------------------------------
+
+bool Config::Value::is_valid_boolean() const {
+    return is_conformable_to_boolean;
+}
+
+// ----------------------------------------------------------------------------
+
 // Convert the Value to a std::string as if writing a new config file
 std::string Config::Value::serialize() const {
     if (is_conformable_to_boolean) {
@@ -487,6 +511,152 @@ std::ostream& Config::operator<< (std::ostream& sout, const Config::Value& v) {
 }
 
 // ============================================================================
+// ValueArray _________________________________________________________________
+
+Config::ValueArray::ValueArray():
+    is_conformable_to_string(false),
+    is_conformable_to_integer(false),
+    is_conformable_to_float(false),
+    is_conformable_to_boolean(false)
+{}
+
+// ----------------------------------------------------------------------------
+
+unsigned Config::ValueArray::size() const {
+    return array.size();
+}
+
+// ----------------------------------------------------------------------------
+
+void Config::ValueArray::add(const Value v) {
+    if (array.empty()) {
+        array.push_back(v);
+        is_conformable_to_string = v.is_valid_string();
+        is_conformable_to_integer = v.is_valid_integer();
+        is_conformable_to_float = v.is_valid_float();
+        is_conformable_to_boolean = v.is_valid_boolean();
+    } else {
+        if (is_conformable_to_string && v.is_valid_string()) {
+            array.push_back(v);
+        } else if (is_conformable_to_integer && v.is_valid_integer()) {
+            is_conformable_to_float &= v.is_valid_float();
+            array.push_back(v);
+        } else if (is_conformable_to_float && v.is_valid_float()) {
+            is_conformable_to_integer &= v.is_valid_integer();
+            array.push_back(v);
+        } else if (is_conformable_to_boolean && v.is_valid_boolean()) {
+            array.push_back(v);
+        } else {
+            throw Config::ValueError(
+                    "Value with invalid type cannot be added to ValueArray.");
+        }
+    }
+}
+
+// ----------------------------------------------------------------------------
+
+void Config::ValueArray::remove(const unsigned index) {
+    if (index >= array.size()) {
+        throw std::out_of_range("Out-of-range index in ValueArray.");
+    }
+    array.erase(array.begin()+index);
+}
+
+// ----------------------------------------------------------------------------
+
+void Config::ValueArray::clear() {
+    array.clear();
+}
+
+// ----------------------------------------------------------------------------
+
+Config::Value Config::ValueArray::at(const unsigned index) const {
+    return array.at(index);
+}
+
+// ----------------------------------------------------------------------------
+
+std::vector<Config::String> Config::ValueArray::as_string() const {
+    if (is_conformable_to_string) {
+        std::vector<Config::String> v;
+        for (auto it = array.begin(); it != array.end(); it++) {
+            v.push_back(it->as_string());
+        }
+        return v;
+    } else {
+        throw Config::TypeError("ValueArray cannot be converted to strings.");
+    }
+}
+
+// ----------------------------------------------------------------------------
+
+std::vector<Config::Integer> Config::ValueArray::as_integer() const {
+    if (is_conformable_to_integer) {
+        std::vector<Config::Integer> v;
+        for (auto it = array.begin(); it != array.end(); it++) {
+            v.push_back(it->as_integer());
+        }
+        return v;
+    } else {
+        throw Config::TypeError("ValueArray cannot be converted to integers.");
+    }
+}
+
+// ----------------------------------------------------------------------------
+
+std::vector<Config::Float> Config::ValueArray::as_float() const {
+    if (is_conformable_to_float) {
+        std::vector<Config::Float> v;
+        for (auto it = array.begin(); it != array.end(); it++) {
+            v.push_back(it->as_float());
+        }
+        return v;
+    } else {
+        throw Config::TypeError("ValueArray cannot be converted to floats.");
+    }
+}
+
+// ----------------------------------------------------------------------------
+
+std::vector<Config::Boolean> Config::ValueArray::as_boolean() const {
+    if (is_conformable_to_boolean) {
+        std::vector<Config::Boolean> v;
+        for (auto it = array.begin(); it != array.end(); it++) {
+            v.push_back(it->as_boolean());
+        }
+        return v;
+    } else {
+        throw Config::TypeError("ValueArray cannot be converted to booleans.");
+    }
+}
+
+// ----------------------------------------------------------------------------
+
+std::string Config::ValueArray::serialize() const {
+    std::stringstream ss("");
+    ss << "[";
+    if (!array.empty()) {
+        ss << array[0];
+        for (auto it = array.begin() + 1; it != array.end(); it++) {
+            ss << ", " << *it;
+        }
+    } else {
+        ss << " ";
+    }
+    ss << "]";
+    return ss.str();
+}
+
+// ----------------------------------------------------------------------------
+
+// Write a ValueArray to a stream
+std::ostream& Config::operator<< (
+        std::ostream& sout, const Config::ValueArray& va) {
+    sout << va.serialize();
+    return sout;
+}
+
+// ============================================================================
 // Group ______________________________________________________________________
 
 // Advance the iterator across a valid key.  Raise a ParseError if there is no
@@ -539,7 +709,7 @@ void Config::Group::parse_file(const std::string filename) {
 void Config::Group::parse_stream(std::istream& sin) {
     // Use a temporary map in case the parsing fails mid-stream.
     std::unordered_map<std::string,Config::Value> temp_scalar_map;
-    std::unordered_map<std::string,std::vector<Config::Value>> temp_array_map;
+    std::unordered_map<std::string,Config::ValueArray> temp_array_map;
     std::string line;
     // Loop over each line of the stream
     // TODO -- Currently Value handles trailing whitespace and comments.  I
@@ -582,9 +752,9 @@ void Config::Group::parse_stream(std::istream& sin) {
         // Split into key and value
         if (*value_it == '[') {
             value_it++;
-            std::vector<Config::Value> value_list;
+            Config::ValueArray value_list;
             while (true) {
-                value_list.push_back(Config::Value(value_it, end));
+                value_list.add(Config::Value(value_it, end));
                 consume_whitespace(value_it, end);
                 if (*value_it == ']') {
                     value_it++;
@@ -610,8 +780,8 @@ void Config::Group::parse_stream(std::istream& sin) {
 
 // ----------------------------------------------------------------------------
 
-// Return the set of keys in the Group
-std::vector<std::string> Config::Group::keys() const {
+// Return the set of keys to scalars in the Group
+std::vector<std::string> Config::Group::scalar_keys() const {
     std::vector<std::string> v;
     for (auto it = scalar_map.begin(); it != scalar_map.end(); it++) {
         v.push_back(it->first);
@@ -621,9 +791,41 @@ std::vector<std::string> Config::Group::keys() const {
 
 // ----------------------------------------------------------------------------
 
+// Return the set of keys to arrays in the Group
+std::vector<std::string> Config::Group::array_keys() const {
+    std::vector<std::string> v;
+    for (auto it = array_map.begin(); it != array_map.end(); it++) {
+        v.push_back(it->first);
+    }
+    return v;
+}
+
+// ----------------------------------------------------------------------------
+
+// Return the set of all keys in the Group
+std::vector<std::string> Config::Group::all_keys() const {
+    std::vector<std::string> v;
+    for (auto it = scalar_map.begin(); it != scalar_map.end(); it++) {
+        v.push_back(it->first);
+    }
+    for (auto it = array_map.begin(); it != array_map.end(); it++) {
+        v.push_back(it->first);
+    }
+    return v;
+}
+
+// ----------------------------------------------------------------------------
+
 // Access a Value according to its key within the Group
-Config::Value& Config::Group::operator[] (std::string key) {
+Config::Value& Config::Group::get_scalar(const std::string key) {
     return scalar_map.at(key);
+}
+
+// ----------------------------------------------------------------------------
+
+// Access a ValueArray according to its key within the Group
+Config::ValueArray& Config::Group::get_array(const std::string key) {
+    return array_map.at(key);
 }
 
 // ----------------------------------------------------------------------------
@@ -635,7 +837,8 @@ std::string Config::Group::serialize() const {
         ss << s_it->first << " = " << s_it->second << std::endl;
     }
     for (auto a_it = array_map.begin(); a_it != array_map.end(); a_it++) {
-        ss << a_it->first << " = [";
+        ss << a_it->first << " = " << a_it->second << std::endl;
+        /*ss << a_it->first << " = [";
         std::vector<Config::Value> v = a_it->second;
         for (unsigned index = 0; index < v.size(); index++) {
             ss << v[index];
@@ -645,7 +848,7 @@ std::string Config::Group::serialize() const {
                 ss << ',';
             }
         }
-        ss << std::endl;
+        ss << std::endl;*/
     }
     return ss.str();
 }
