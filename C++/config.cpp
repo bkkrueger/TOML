@@ -30,7 +30,7 @@ void consume_whitespace(string_it& it, const string_it& end) {
 // an error.
 void consume_character(const char c, string_it& it, const string_it& end) {
     if (it == end) {
-        throw Config::ParserError("No character to consume.");
+        throw Config::ParseError("No character to consume.");
     } else if (*it == c) {
         it++;
     } else {
@@ -48,7 +48,7 @@ void consume_character(const char c, string_it& it, const string_it& end) {
 // Advance the iterator to the end of the line if the iterator points to the
 // start of a comment
 void consume_comment(string_it& it, const string_it& end) {
-    consume_character(Table::comment, it, end);
+    consume_character(Config::Table::comment, it, end);
     it = end;
 }
 
@@ -111,24 +111,13 @@ static unsigned to_digit(const char c) {
 
 // ----------------------------------------------------------------------------
 
-// Advance the iterator across a key and return the key
-std::string analyze_key(string_it& it, const string_it& end) {
-    if (*it == '"') {
-        return analyze_quoted_key(it, end);
-    } else {
-        return analyze_bare_key(it end);
-    }
-}
-
-// ----------------------------------------------------------------------------
-
 // Advance the iterator across a quoted key and return the key
 std::string analyze_quoted_key(string_it& it, const string_it& end) {
     // Quoted keys follow the same rules as String values, so we can just
     // analyze it as a value and return the String if a valid String results
     Config::Value v;
     try {
-        v(it, end);
+        v.analyze(it, end);
     } catch (Config::ParseError& err) {
         throw Config::ParseError("Could not parse quoted key.");
     }
@@ -153,9 +142,20 @@ std::string analyze_bare_key(string_it& it, const string_it& end) {
         it++;
     }
     if (key.empty()) {
-        throw ParseError("Empty bare key.");
+        throw Config::ParseError("Empty bare key.");
     }
     return key;
+}
+
+// ----------------------------------------------------------------------------
+
+// Advance the iterator across a key and return the key
+std::string analyze_key(string_it& it, const string_it& end) {
+    if (*it == '"') {
+        return analyze_quoted_key(it, end);
+    } else {
+        return analyze_bare_key(it, end);
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -165,14 +165,14 @@ std::string analyze_bare_key(string_it& it, const string_it& end) {
 std::vector<std::string> analyze_table_name(
         string_it& it, const string_it& end) {
     std::vector<std::string> path;
-    consume_whitespace();
+    consume_whitespace(it, end);
     path.push_back(analyze_key(it, end));
-    consume_whitespace();
+    consume_whitespace(it, end);
     while (*it == '.') {
         it++;
-        consume_whitespace();
+        consume_whitespace(it, end);
         path.push_back(analyze_key(it, end));
-        consume_whitespace();
+        consume_whitespace(it, end);
     }
     return path;
 }
@@ -765,32 +765,8 @@ std::ostream& Config::operator<< (
 // ============================================================================
 // Table ______________________________________________________________________
 
-// Find a subtable from a path.  Create the subtable if it does not exist
-// (including all intermediate subtables)
-Table& Config::Table::get_table(
-        const std::vector<std::string> path, const bool create) {
-    Table* current_table = this;
-    for (auto it = path.begin(); it != path.end(); it++) {
-        if (create && !current_table->has(*it)) {
-            // if create is false, we won't add the new table and get_table()
-            // below will generate the appropriate error for a missing key
-            current_table->add(*it, Table());
-        }
-        current_table = &current_table->get_table(*it);
-    }
-    return *current_table;
-}
-
-// ----------------------------------------------------------------------------
-
-// Find a subtable from a string.  Create the subtable if it does not
-Table& Config::Table::get_table(const std::string path, const bool create) {
-    return get_table(analyze_table_name(path), create);
-}
-
-// ----------------------------------------------------------------------------
-
 // Parse a Table from an input string
+// -- This is a convenience method that wraps parse_stream
 void Config::Table::parse_string(const std::string s) {
     // Load into a stringstream and parse that stream
     std::istringstream iss(s);
@@ -800,6 +776,7 @@ void Config::Table::parse_string(const std::string s) {
 // ----------------------------------------------------------------------------
 
 // Parse a Table from a file (specified by the file name)
+// -- This is a convenience method that wraps parse_stream
 void Config::Table::parse_file(const std::string filename) {
     // Open the file as a filestream and parse that stream
     std::ifstream fin;
@@ -810,72 +787,136 @@ void Config::Table::parse_file(const std::string filename) {
 
 // ----------------------------------------------------------------------------
 
-// Parse a Table from a stream.  A failure results in a ParseError, but leaves
-// the original Table unchanged.
+// Parse a Table from a stream.  A failure results in a ParseError, and clears
+// the Table.
 void Config::Table::parse_stream(std::istream& sin) {
+    clear();
     Table* current_table = this;
-    // Use a temporary map in case the parsing fails mid-stream.
-    std::unordered_map<std::string,Config::Value> temp_scalar_map;
-    std::unordered_map<std::string,Config::ValueArray> temp_array_map;
-    std::unordered_map<std::string,Config::Table> temp_table_map;
     std::string line;
     // Loop over each line of the stream
-    while(std::getline(sin,line)) {
-        string_it it = line.begin();
-        const string_it end = line.end();
-        // Strip leading whitespace
-        consume_whitespace(it, end);
-        // What kind of line is it?
-        if (it == end || *it == comment) {
-            // If the line is empty or is comment-only, skip it
-            continue;
-        } else if (*it == '[') {
-            // This is the start of a new Table
-            consume_character('[', it, end);
-            std::vector<std::string> path = analyze_table_name(it, end);
-            consume_character(']', it, end);
-            consume_to_eol(it, end);
-            // TODO -- verify that the key does not already exist (as a Table,
-            //         Value, or ValueArray) --> not even as a Table, because
-            //         the TOML standard does not allow re-entry of tables
-            current_table = &(this->get_table(path));
-        } else {
-            // This is a key pair
-            std::string key = analyze_key(it, end);
-            // TODO -- verify that the key does not already exist (as a Table,
-            //         Value, or ValueArray)
+    try {
+        while(std::getline(sin,line)) {
+            string_it it = line.begin();
+            const string_it end = line.end();
+            // Strip leading whitespace
             consume_whitespace(it, end);
-            consume_character('=', it, end);
-            if (*it == '[') {
-                // This is a ValueArray
-                Config::ValueArray va;
+            // What kind of line is it?
+            if (it == end || *it == comment) {
+                // If the line is empty or is comment-only, skip it
+                continue;
+            } else if (*it == '[') {
+                // This is the start of a new Table
+                // Note: All paths from a file will be specified from the root
+                //       table, which is the Table doing the processing.
                 consume_character('[', it, end);
-                consume_whitespace(it, end);
-                while (*it != ']') {
-                    va.add(Config::Value(it, end));
-                    consume_whitespace();
-                    if (*it == ',') {
-                        consume_character(',', it, end);
-                        consume_whitespace(it, end);
-                    } else if (*it != ']') {
-                        throw Config::ParseError("Malformed array of values.");
-                    }
-                }
+                std::vector<std::string> path = analyze_table_name(it, end);
                 consume_character(']', it, end);
                 consume_to_eol(it, end);
-                current_table->add(key, va);
-                // TODO -- the TOML standard allows an extra terminating comma
-                // before the closing square bracket; does my method allow?
+                // The TOML standard does not allow re-entering a Table after
+                // you've already created it and then moved to another Table.
+                // Thus we generate an error if the Table already exists.
+                // TODO -- The TOML standard actually allows a slightly more
+                //         complex behavior: If you define Table [a.b], you can
+                //         then go back and fill in Table [a] so long as [a]
+                //         only exists because you built it as an intermediary
+                //         to build [a.b].  Thus I will need a more-complex
+                //         bookkeeping mechanism to specify whether a Table
+                //         exists because it was directly defined or because it
+                //         was built as an intermediary.
+                if (this->has(path)) {
+                    std::string message = "Key \"";
+                    for (unsigned index = 0; index < path.size()-1; index++) {
+                        message += path[index] + ".";
+                    }
+                    message += path[path.size()-1] + "\" is not unique.";
+                    throw ParseError(message);
+                }
+                // Create the Table (and all intermediaries)
+                current_table = &(this->get_table(path, true));
             } else {
-                // This is a Value
-                Config::Value v(it, end);
-                consume_to_eol(it, end);
-                current_table->add(key, v);
+                // This is a key pair
+                std::string key = analyze_key(it, end);
+                if (current_table->has(key)) {
+                    throw ParseError("Key \"" + key + "\" is not unique.");
+                }
+                consume_whitespace(it, end);
+                consume_character('=', it, end);
+                consume_whitespace(it, end);
+                if (*it == '[') {
+                    // This is a ValueArray
+                    Config::ValueArray va;
+                    consume_character('[', it, end);
+                    consume_whitespace(it, end);
+                    while (*it != ']') {
+                        va.add(Config::Value(it, end));
+                        consume_whitespace(it, end);
+                        if (*it == ',') {
+                            consume_character(',', it, end);
+                            consume_whitespace(it, end);
+                        } else if (*it != ']') {
+                            throw Config::ParseError(
+                                    "Malformed array of values.");
+                        }
+                    }
+                    consume_character(']', it, end);
+                    consume_to_eol(it, end);
+                    current_table->add(key, va);
+                } else {
+                    // This is a Value
+                    Config::Value v(it, end);
+                    consume_to_eol(it, end);
+                    current_table->add(key, v);
+                }
             }
         }
+    } catch (Config::ParseError& pe) {
+        clear();
+        throw;
     }
-    scalar_map = temp_scalar_map;
-    array_map = temp_array_map;
+}
+
+// ----------------------------------------------------------------------------
+
+// Add a Value to the Table
+void Config::Table::add(const std::string key, const Value& v) {
+    if (scalar_map.find(key) != scalar_map.end()) {
+        throw Config::TableError("Key \"" + key + "\" already exists.");
+    }
+    scalar_map[key] = v;
+}
+
+// ----------------------------------------------------------------------------
+
+// Add a ValueArray to the Table
+void Config::Table::add(const std::string key, const ValueArray& va) {
+    if (array_map.find(key) != array_map.end()) {
+        throw Config::TableError("Key \"" + key + "\" already exists.");
+    }
+    array_map[key] = va;
+}
+
+// ----------------------------------------------------------------------------
+
+// Add a sub-Table to the Table
+void Config::Table::add(const std::string key, const Table& t) {
+    if (table_map.find(key) != table_map.end()) {
+        throw Config::TableError("Key \"" + key + "\" already exists.");
+    }
+    table_map[key] = t;
+}
+
+// ----------------------------------------------------------------------------
+
+// Return the set of all keys in the Table
+std::vector<std::string> Config::Table::all_keys() const {
+    std::vector<std::string> v;
+    for (auto it = scalar_map.begin(); it != scalar_map.end(); it++) {
+        v.push_back(it->first);
+    }
+    for (auto it = array_map.begin(); it != array_map.end(); it++) {
+        v.push_back(it->first);
+    }
+    return v;
 }
 
 // ----------------------------------------------------------------------------
@@ -913,16 +954,47 @@ std::vector<std::string> Config::Table::table_keys() const {
 
 // ----------------------------------------------------------------------------
 
-// Return the set of all keys in the Table
-std::vector<std::string> Config::Table::all_keys() const {
-    std::vector<std::string> v;
-    for (auto it = scalar_map.begin(); it != scalar_map.end(); it++) {
-        v.push_back(it->first);
+// Does the Table have an element with this key?
+bool Config::Table::has(const std::string key) const {
+    return (has_scalar(key) || has_array(key) || has_table(key));
+}
+
+// ----------------------------------------------------------------------------
+
+// Does the Table have a scalar Value with this key?
+bool Config::Table::has_scalar(const std::string key) const {
+    return (scalar_map.find(key) != scalar_map.end());
+}
+
+// ----------------------------------------------------------------------------
+
+// Does the Table have a ValueArray with this key?
+bool Config::Table::has_array(const std::string key) const {
+    return (array_map.find(key) != array_map.end());
+}
+
+// ----------------------------------------------------------------------------
+
+// Does the Table have a Table with this key?
+bool Config::Table::has_table(const std::string key) const {
+    return (table_map.find(key) != table_map.end());
+}
+
+// ----------------------------------------------------------------------------
+
+// Does the Table have an element with this path?
+bool Config::Table::has(const std::vector<std::string> path) const {
+    const Table* current_table = this;
+    for (unsigned index = 0; index < path.size(); index++) {
+        if (current_table->has(path[index])) {
+            if (index != path.size() - 1) {
+                current_table = &(current_table->get_table(path[index]));
+            }
+        } else {
+            return false;
+        }
     }
-    for (auto it = array_map.begin(); it != array_map.end(); it++) {
-        v.push_back(it->first);
-    }
-    return v;
+    return true;
 }
 
 // ----------------------------------------------------------------------------
@@ -948,14 +1020,68 @@ Config::Table& Config::Table::get_table(const std::string key) {
 
 // ----------------------------------------------------------------------------
 
+// Access a Table according to its key within the Table (const version)
+const Config::Table& Config::Table::get_table(const std::string key) const {
+    return table_map.at(key);
+}
+
+// ----------------------------------------------------------------------------
+
+// Find a subtable from a path.  The create flag specifies whether or not to
+// create table if missing (including intermediate tables).
+Config::Table& Config::Table::get_table(
+        const std::vector<std::string> path, const bool create) {
+    Table* current_table = this;
+    for (auto it = path.begin(); it != path.end(); it++) {
+        if (create && !current_table->has(*it)) {
+            // if create is false, we won't add the new table and get_table()
+            // below will generate the appropriate error for a missing key
+            current_table->add(*it, Table());
+        }
+        current_table = &current_table->get_table(*it);
+    }
+    return *current_table;
+}
+
+// ----------------------------------------------------------------------------
+
+// Find a subtable from a path.  This is the const version.
+const Config::Table& Config::Table::get_table(
+        const std::vector<std::string> path) const {
+    const Table* current_table = this;
+    for (auto it = path.begin(); it != path.end(); it++) {
+        current_table = &(current_table->get_table(*it));
+    }
+    return *current_table;
+}
+
+// ----------------------------------------------------------------------------
+
+// Clear the Table
+void Config::Table::clear() {
+    scalar_map.clear();
+    array_map.clear();
+    table_map.clear();
+}
+
+// ----------------------------------------------------------------------------
+
 // Convert the Table to a std::string as if writing a new config file
-std::string Config::Table::serialize() const {
+std::string Config::Table::serialize(unsigned indent_level) const {
+    std::string indent("");
+    for (unsigned i = 0; i < indent_level; i++) {
+        indent += "    ";
+    }
     std::stringstream ss("");
     for (auto s_it = scalar_map.begin(); s_it != scalar_map.end(); s_it++) {
-        ss << s_it->first << " = " << s_it->second << std::endl;
+        ss << indent << s_it->first << " = " << s_it->second << std::endl;
     }
     for (auto a_it = array_map.begin(); a_it != array_map.end(); a_it++) {
-        ss << a_it->first << " = " << a_it->second << std::endl;
+        ss << indent << a_it->first << " = " << a_it->second << std::endl;
+    }
+    for (auto t_it = table_map.begin(); t_it != table_map.end(); t_it++) {
+        ss << indent << "[" << t_it->first << "]" << std::endl;
+        ss << t_it->second.serialize(indent_level+1) << std::endl;
     }
     return ss.str();
 }

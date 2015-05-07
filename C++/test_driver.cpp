@@ -82,13 +82,13 @@ int main(int argc, char *argv[]) {
     std::string file = "yes = \"yes\" # YES\nno=0\nmaybe    =0.5\nwhat=\"\\\"what\\nare\\byou\\ttalking\\nabout?\\\"\"";
     std::cout << std::endl;
     std::cout << "Parse [" << file << "]" << std::endl;
-    Config::Group group;
-    group.parse_string(file);
-    std::cout << group;
+    Config::Table table;
+    table.parse_string(file);
+    std::cout << table;
     std::cout << "what (as a string) --> "
-        << group.get_scalar("what").as_string() << std::endl;
+        << table.get_scalar("what").as_string() << std::endl;
     try {
-        std::cout << "who --> " << group.get_scalar("who") << std::endl;
+        std::cout << "who --> " << table.get_scalar("who") << std::endl;
     } catch (std::out_of_range& err) {
         std::cout << "key \"who\" does not exist" << std::endl;
     }
@@ -96,13 +96,13 @@ int main(int argc, char *argv[]) {
     file = "parameters.config";
     std::cout << std::endl;
     std::cout << "Parse file \"" << file << "\"" << std::endl;
-    group.parse_file(file);
-    std::cout << group;
+    table.parse_file(file);
+    std::cout << table.serialize(1);
 
     std::cout << std::endl;
     std::cout << "Access of specific members:" << std::endl;
-    std::cout << "    float2 -- > " << group.get_scalar("float2") << std::endl;
-    std::cout << "    array_var --> " << group.get_array("array_var")
+    std::cout << "    float2 -- > " << table.get_scalar("float2") << std::endl;
+    std::cout << "    array_var --> " << table.get_array("array_var")
         << std::endl;
 
     return 0;

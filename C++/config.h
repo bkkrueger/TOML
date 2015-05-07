@@ -63,6 +63,13 @@ namespace Config {
 
     // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+    class TableError : public Error {
+        public:
+            TableError(std::string msg): Error(msg) {}
+    };
+
+    // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
     class TypeError : public Error {
         public:
             TypeError(std::string msg): Error(msg) {}
@@ -215,9 +222,9 @@ namespace Config {
             void parse_stream(std::istream& sin);
 
             // Add an element
-            void add(std::string key, Value& v);
-            void add(std::string key, ValueArray& va);
-            void add(std::string key, Table& t);
+            void add(const std::string key, const Value& v);
+            void add(const std::string key, const ValueArray& va);
+            void add(const std::string key, const Table& t);
 
             // Get the list of keys
             std::vector<std::string> all_keys() const;
@@ -226,29 +233,32 @@ namespace Config {
             std::vector<std::string> table_keys() const;
 
             // Does the key exist in the table?
-            // TODO -- should be recursive or not?
-            // TODO -- adding should not be recursive so that a file cannot
-            //         have a key pair like table.subtable.key = "value"
-            bool has(const std::string path) const;
+            bool has(const std::string key) const;
+            // This form allows you to specify a path (vector of keys to follow
+            // in order to dive into nested tables), instead of having to
+            // manually work through all path elements one at a time.
             bool has(const std::vector<std::string> path) const;
-            // TODO -- Should I have a method to tell whether a key is a Value,
-            //         ValueArray, or Table?
+            bool has_scalar(const std::string key) const;
+            bool has_array(const std::string key) const;
+            bool has_table(const std::string key) const;
 
             // Access an element by its key
-            // TODO -- The get_table method will recurse down into the
-            //         structure to get the appropriate element.  I should
-            //         modify get_scalar and get_array to do the same (they
-            //         will assume that the last element in the path is the
-            //         name of the scalar or array they want).
             Value& get_scalar(const std::string key);
             ValueArray& get_array(const std::string key);
-            Table& get_table(const std::string path, const bool create=true);
-            Table& get_table(
-                    const std::vector<std::string> path,
-                    const bool create=true);
+            Table& get_table(const std::string key);
+            const Table& get_table(const std::string key) const;
+            // This form allows you to specify a path (vector of keys to follow
+            // in order to dive into nested tables), instead of having to
+            // manually work through all path elements one at a time.
+            Table& get_table(const std::vector<std::string> path,
+                    const bool create=false);
+            const Table& get_table(const std::vector<std::string> path) const;
+
+            // Clear the Table
+            void clear();
 
             // Output
-            std::string serialize() const;
+            std::string serialize(unsigned indent_level=0) const;
             friend std::ostream& operator<< (
                     std::ostream& sout, const Table& g);
     };
