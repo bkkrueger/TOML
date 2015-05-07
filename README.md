@@ -23,8 +23,6 @@ boolean_variable = false
 
 # Planned Features
 
-1. Nested groups (subgroups within other groups).
-2. Lists of groups.
-3. Datetime values.
-4. Additional TOML features (e.g. underscores in numbers)
-
+1. Lists of groups.
+2. Datetime values.
+3. Additional TOML features (e.g. underscores in numbers)
