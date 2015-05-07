@@ -220,6 +220,7 @@ namespace Config {
             void parse_string(const std::string s);
             void parse_file(const std::string filename);
             void parse_stream(std::istream& sin);
+            static bool valid_key(const std::string key);
 
             // Add an element
             void add(const std::string key, const Value& v);

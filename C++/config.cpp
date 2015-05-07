@@ -877,10 +877,30 @@ void Config::Table::parse_stream(std::istream& sin) {
 
 // ----------------------------------------------------------------------------
 
+bool Config::Table::valid_key(const std::string key) {
+    string_it it = key.begin();
+    const string_it end = key.end();
+    try {
+        analyze_key(it, end);
+    } catch(Config::ParseError& pe) {
+        return false;
+    }
+    if (it == end) {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+// ----------------------------------------------------------------------------
+
 // Add a Value to the Table
 void Config::Table::add(const std::string key, const Value& v) {
     if (scalar_map.find(key) != scalar_map.end()) {
         throw Config::TableError("Key \"" + key + "\" already exists.");
+    }
+    if (!valid_key(key)) {
+        throw Config::TableError("Key \"" + key + "\" is invalid.");
     }
     scalar_map[key] = v;
 }
@@ -892,6 +912,9 @@ void Config::Table::add(const std::string key, const ValueArray& va) {
     if (array_map.find(key) != array_map.end()) {
         throw Config::TableError("Key \"" + key + "\" already exists.");
     }
+    if (!valid_key(key)) {
+        throw Config::TableError("Key \"" + key + "\" is invalid.");
+    }
     array_map[key] = va;
 }
 
@@ -899,8 +922,14 @@ void Config::Table::add(const std::string key, const ValueArray& va) {
 
 // Add a sub-Table to the Table
 void Config::Table::add(const std::string key, const Table& t) {
+    if (this == &t) {
+        throw Config::TableError("Cannot have recursive tables.");
+    }
     if (table_map.find(key) != table_map.end()) {
         throw Config::TableError("Key \"" + key + "\" already exists.");
+    }
+    if (!valid_key(key)) {
+        throw Config::TableError("Key \"" + key + "\" is invalid.");
     }
     table_map[key] = t;
 }

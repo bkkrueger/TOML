@@ -105,5 +105,36 @@ int main(int argc, char *argv[]) {
     std::cout << "    array_var --> " << table.get_array("array_var")
         << std::endl;
 
+    std::cout << std::endl;
+    std::cout << "Building a table programmatically." << std::endl;
+    table.clear();
+    v.set("test value");
+    table.add("string_var", v);
+    try {
+        table.add("string_var", v);
+        std::cout << " !! Added redundant value." << std::endl;
+    } catch (Config::TableError& te) {
+        std::cout << "    Failed to add redundant value." << std::endl;
+    }
+    try {
+        table.add("string var", v);
+        std::cout << " !! Added value with invalid key." << std::endl;
+    } catch (Config::TableError& te) {
+        std::cout << "    Failed to add value with invalid." << std::endl;
+    }
+    Config::Table table2;
+    v.set(static_cast<Config::Integer>(42));
+    table2.add("integer", v);
+    v.set(3.14);
+    table2.add("float", v);
+    table.add("\"table with spaces in name\"", table2);
+    try {
+        table.add("recursion", table);
+        std::cout << " !! Added recursive table." << std::endl;
+    } catch (Config::TableError& te) {
+        std::cout << "    Failed to add recursive table." << std::endl;
+    }
+    std::cout << table.serialize(2);
+
     return 0;
 }
