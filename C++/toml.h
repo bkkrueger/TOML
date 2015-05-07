@@ -1,7 +1,11 @@
-/* A simple configuration file parser. */
+/* A simple configuration file parser.
+ *
+ * Over time this is intended to grow to match the TOML format.  Currently it
+ * provides a subset of TOML.
+ */
 
-#ifndef CONFIG_H
-#define CONFIG_H
+#ifndef TOML_H
+#define TOML_H
 
 #include <cmath>
 #include <cstdint>
@@ -11,7 +15,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace Config {
+namespace TOML {
 
     // ========================================================================
 
@@ -47,7 +51,7 @@ namespace Config {
 
     // ========================================================================
 
-    // All errors used here inherit from ConfigError (for inheritance and
+    // All errors used here inherit from Error (for inheritance and
     // catching).
     class Error : public std::runtime_error {
         public:
@@ -266,5 +270,5 @@ namespace Config {
 
 }
 
-#endif // #ifndef CONFIG_H
+#endif // #ifndef TOML_H
 

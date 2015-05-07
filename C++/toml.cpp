@@ -1,4 +1,8 @@
-/* A simple configuration file parser. */
+/* A simple configuration file parser.
+ *
+ * Over time this is intended to grow to match the TOML format.  Currently it
+ * provides a subset of TOML.
+ */
 
 #include <cmath>
 #include <cstdint>
@@ -10,9 +14,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include "config.h"
+#include "toml.h"
 
-typedef Config::string_it string_it;
+typedef TOML::string_it string_it;
 
 // ============================================================================
 // General parsing functions
@@ -30,7 +34,7 @@ void consume_whitespace(string_it& it, const string_it& end) {
 // an error.
 void consume_character(const char c, string_it& it, const string_it& end) {
     if (it == end) {
-        throw Config::ParseError("No character to consume.");
+        throw TOML::ParseError("No character to consume.");
     } else if (*it == c) {
         it++;
     } else {
@@ -39,7 +43,7 @@ void consume_character(const char c, string_it& it, const string_it& end) {
         message.append("' != '");
         message.append(1, *it);
         message.append("'.");
-        throw Config::ParseError(message);
+        throw TOML::ParseError(message);
     }
 }
 
@@ -48,7 +52,7 @@ void consume_character(const char c, string_it& it, const string_it& end) {
 // Advance the iterator to the end of the line if the iterator points to the
 // start of a comment
 void consume_comment(string_it& it, const string_it& end) {
-    consume_character(Config::Table::comment, it, end);
+    consume_character(TOML::Table::comment, it, end);
     it = end;
 }
 
@@ -105,7 +109,7 @@ static unsigned to_digit(const char c) {
               std::string message = "Character \"";
               message.append(1, c);
               message.append("\" is not a digit.");
-              throw Config::ParseError(message);
+              throw TOML::ParseError(message);
     }
 }
 
@@ -115,18 +119,18 @@ static unsigned to_digit(const char c) {
 std::string analyze_quoted_key(string_it& it, const string_it& end) {
     // Quoted keys follow the same rules as String values, so we can just
     // analyze it as a value and return the String if a valid String results
-    Config::Value v;
+    TOML::Value v;
     try {
         v.analyze(it, end);
-    } catch (Config::ParseError& err) {
-        throw Config::ParseError("Could not parse quoted key.");
+    } catch (TOML::ParseError& err) {
+        throw TOML::ParseError("Could not parse quoted key.");
     }
     if (!v.is_valid_string()) {
-        throw Config::ParseError("Could not parse quoted key.");
+        throw TOML::ParseError("Could not parse quoted key.");
     }
     std::string s = v.as_string();
     if (s.empty()) {
-        throw Config::ParseError("Cannot have an empty quoted key.");
+        throw TOML::ParseError("Cannot have an empty quoted key.");
     }
     return v.as_string();
 }
@@ -142,7 +146,7 @@ std::string analyze_bare_key(string_it& it, const string_it& end) {
         it++;
     }
     if (key.empty()) {
-        throw Config::ParseError("Empty bare key.");
+        throw TOML::ParseError("Empty bare key.");
     }
     return key;
 }
@@ -181,7 +185,7 @@ std::vector<std::string> analyze_table_name(
 // Value ______________________________________________________________________
 
 // Clear the Value -- erase the internal values and set it to be nonconformable
-void Config::Value::clear() {
+void TOML::Value::clear() {
     // Not conformable to anything
     is_conformable_to_string = false;
     is_conformable_to_integer = false;
@@ -198,13 +202,13 @@ void Config::Value::clear() {
 
 // Attempt to parse the value as a String.  Return the String or raise a
 // ParseError if parsing fails.
-Config::String Config::Value::parse_string(
+TOML::String TOML::Value::parse_string(
         string_it& it, const string_it& end) {
     if (*it != '"') {
-        throw Config::ParseError("Unable to parse as a string.");
+        throw TOML::ParseError("Unable to parse as a string.");
     }
     it++;
-    Config::String temp_string = "";
+    TOML::String temp_string = "";
     while (it != end) {
         if (*it == '\\') {
             it++;
@@ -233,7 +237,7 @@ Config::String Config::Value::parse_string(
                 std::string message = "Unknown escape character \"\\";
                 message.append(1, *it);
                 message.append("\".");
-                throw Config::ParseError(message);
+                throw TOML::ParseError(message);
             }
         } else if (*it == '"') {
             break;
@@ -243,7 +247,7 @@ Config::String Config::Value::parse_string(
         }
     }
     if (*it != '"') {
-        throw Config::ParseError("Unable to parse as a string.");
+        throw TOML::ParseError("Unable to parse as a string.");
     }
     it++;
     return temp_string;
@@ -253,9 +257,9 @@ Config::String Config::Value::parse_string(
 
 // Attempt to parse the value as a Boolean.  Return the Boolean or raise a
 // ParseError if parsing fails.
-Config::Boolean Config::Value::parse_boolean(
+TOML::Boolean TOML::Value::parse_boolean(
         string_it& it, const string_it& end) {
-    Config::Boolean temp_bool;
+    TOML::Boolean temp_bool;
     if (std::string(it, it+4) == "true") {
         it = it + 4;
         temp_bool = true;
@@ -263,7 +267,7 @@ Config::Boolean Config::Value::parse_boolean(
         it = it + 5;
         temp_bool = false;
     } else {
-        throw Config::ParseError("Unable to parse as a boolean.");
+        throw TOML::ParseError("Unable to parse as a boolean.");
     }
     return temp_bool;
 }
@@ -273,15 +277,15 @@ Config::Boolean Config::Value::parse_boolean(
 // Attempt to parse the value as a number.  Return the Number or raise a
 // ParseError if parsing fails.
 // TODO -- handle underscore separators
-Config::Number Config::Value::parse_number(
+TOML::Number TOML::Value::parse_number(
         string_it& it, const string_it& end) {
-    Config::Number temp_number;
+    TOML::Number temp_number;
     temp_number.valid_integer = false;
     temp_number.integer_value = 0;
     temp_number.valid_float = false;
     temp_number.float_value = 0.0;
     // sign
-    Config::Integer sign;
+    TOML::Integer sign;
     if (*it == '-') {
         sign = -1;
         it++;
@@ -291,17 +295,17 @@ Config::Number Config::Value::parse_number(
     } else if (*it == '.' || is_digit(*it)) {
         sign = 1;
     } else {
-        throw Config::ParseError("Unable to parse as a number.");
+        throw TOML::ParseError("Unable to parse as a number.");
     }
     // integer part
-    Config::Integer ipart = 0;
+    TOML::Integer ipart = 0;
     while (it != end && is_digit(*it)) {
         ipart = 10 * ipart + to_digit(*it);
         it++;
     }
     // decimal
-    Config::Float dpart = 0;
-    Config::Float shift = 0.1;
+    TOML::Float dpart = 0;
+    TOML::Float shift = 0.1;
     if (it != end && *it == '.') {
         it++;
         while (it != end && is_digit(*it)) {
@@ -311,8 +315,8 @@ Config::Number Config::Value::parse_number(
         }
     }
     // exponent (scientific notation)
-    Config::Integer e_sign;
-    Config::Integer exponent = 0;
+    TOML::Integer e_sign;
+    TOML::Integer exponent = 0;
     if (it != end && (*it == 'e' || *it == 'E')) {
         it++;
         if (*it == '-') {
@@ -324,7 +328,7 @@ Config::Number Config::Value::parse_number(
         } else if (is_digit(*it)) {
             e_sign = 1;
         } else {
-            throw Config::ParseError("Invalid exponent in number.");
+            throw TOML::ParseError("Invalid exponent in number.");
         }
         while (it != end && is_digit(*it)) {
             exponent = 10 * exponent + to_digit(*it);
@@ -335,8 +339,8 @@ Config::Number Config::Value::parse_number(
     // Construct the number
     if (dpart == 0 && exponent == 0) {
         // This is really an integer, and may also be a float
-        Config::Integer as_integer = sign * ipart;
-        Config::Float as_float = static_cast<Config::Float>(as_integer);
+        TOML::Integer as_integer = sign * ipart;
+        TOML::Float as_float = static_cast<TOML::Float>(as_integer);
         if (as_integer == as_float) {
             temp_number.float_value = as_float;
             temp_number.valid_float = true;
@@ -345,10 +349,10 @@ Config::Number Config::Value::parse_number(
         temp_number.valid_integer = true;
     } else {
         // This is really a float, and may also be an integer
-        Config::Float as_float = sign *
-            (static_cast<Config::Float>(ipart) + dpart) *
+        TOML::Float as_float = sign *
+            (static_cast<TOML::Float>(ipart) + dpart) *
             std::pow(10.0, exponent);
-        Config::Integer as_integer = static_cast<Config::Integer>(as_float);
+        TOML::Integer as_integer = static_cast<TOML::Integer>(as_float);
         if (as_float == as_integer) {
             temp_number.integer_value = as_integer;
             temp_number.valid_integer = true;
@@ -364,7 +368,7 @@ Config::Number Config::Value::parse_number(
 // Analyze the given input string.  If it is a valid value, set the Value to
 // have the appropriate internal values and flags.  Otherwise, raise a
 // ParseError.
-void Config::Value::analyze(string_it& it, const string_it& end) {
+void TOML::Value::analyze(string_it& it, const string_it& end) {
     // Clear the current internal values and flags
     clear();
 
@@ -373,26 +377,26 @@ void Config::Value::analyze(string_it& it, const string_it& end) {
 
     // Ensure there is something (non-comment) left in the string
     if (it == end || *it == '#') {
-        throw Config::ParseError("Empty value.");
+        throw TOML::ParseError("Empty value.");
     }
 
     // Choose which type to parse
     if (*it == '"') {
         // This is either a String or nothing
-        Config::String temp_string = parse_string(it, end);
+        TOML::String temp_string = parse_string(it, end);
         // Save it
         value_as_string = temp_string;
         is_conformable_to_string = true;
     } else if (*it == 't' || *it == 'f') {
         // This is either a Boolean or nothing
-        Config::Boolean temp_boolean = parse_boolean(it, end);
+        TOML::Boolean temp_boolean = parse_boolean(it, end);
         // Save it
         value_as_boolean = temp_boolean;
         is_conformable_to_boolean = true;
     } else if (*it == '-' || *it == '+' || *it == '.' ||
             is_digit(*it)) {
         // This is either an Integer, a Float, both, or nothing
-        Config::Number temp_number = parse_number(it, end);
+        TOML::Number temp_number = parse_number(it, end);
         // Save it
         value_as_integer = temp_number.integer_value;
         value_as_float = temp_number.float_value;
@@ -400,7 +404,7 @@ void Config::Value::analyze(string_it& it, const string_it& end) {
         is_conformable_to_float = temp_number.valid_float;
     } else {
         // This is nothing
-        throw Config::ParseError("Unable to parse \"" + std::string(it,end) +
+        throw TOML::ParseError("Unable to parse \"" + std::string(it,end) +
                 "\" to a value.");
     }
 }
@@ -412,14 +416,14 @@ void Config::Value::analyze(string_it& it, const string_it& end) {
 //    considering all my internal data is basic types, the performance
 //    difference is, for all intents and purposes, zero.  This is easier to
 //    write and to maintain.
-Config::Value::Value() {
+TOML::Value::Value() {
     clear();
 }
 
 // ----------------------------------------------------------------------------
 
 // Construct a Value by analyzing an input string
-Config::Value::Value(const std::string input_string) {
+TOML::Value::Value(const std::string input_string) {
     string_it it = input_string.begin();
     analyze(it, input_string.end());
 }
@@ -427,14 +431,14 @@ Config::Value::Value(const std::string input_string) {
 // ----------------------------------------------------------------------------
 
 // Construct a Value by analyzing an input string from iterators
-Config::Value::Value(string_it& it, const string_it& end) {
+TOML::Value::Value(string_it& it, const string_it& end) {
     analyze(it, end);
 }
 
 // ----------------------------------------------------------------------------
 
 // Set the Value by analyzing an input string
-void Config::Value::set_from_string(const std::string input_string) {
+void TOML::Value::set_from_string(const std::string input_string) {
     string_it it = input_string.begin();
     analyze(it, input_string.end());
 }
@@ -442,7 +446,7 @@ void Config::Value::set_from_string(const std::string input_string) {
 // ----------------------------------------------------------------------------
 
 // Set the Value from a String
-void Config::Value::set(const Config::String s) {
+void TOML::Value::set(const TOML::String s) {
     clear();
     value_as_string = s;
     is_conformable_to_string = true;
@@ -451,11 +455,11 @@ void Config::Value::set(const Config::String s) {
 // ----------------------------------------------------------------------------
 
 // Set the Value from an Integer (may also be conformable to a Float)
-void Config::Value::set(const Config::Integer i) {
+void TOML::Value::set(const TOML::Integer i) {
     clear();
     value_as_integer = i;
     is_conformable_to_integer = true;
-    Config::Float temp_float = static_cast<Config::Float>(i);
+    TOML::Float temp_float = static_cast<TOML::Float>(i);
     if (temp_float == i) {
         value_as_float = temp_float;
         is_conformable_to_float = true;
@@ -465,11 +469,11 @@ void Config::Value::set(const Config::Integer i) {
 // ----------------------------------------------------------------------------
 
 // Set the Value from a Float (may also be conformable to an Integer)
-void Config::Value::set(const Config::Float f) {
+void TOML::Value::set(const TOML::Float f) {
     clear();
     value_as_float = f;
     is_conformable_to_float = true;
-    Config::Integer temp_integer = static_cast<Config::Integer>(f);
+    TOML::Integer temp_integer = static_cast<TOML::Integer>(f);
     if (temp_integer == f) {
         value_as_integer = temp_integer;
         is_conformable_to_integer = true;
@@ -479,7 +483,7 @@ void Config::Value::set(const Config::Float f) {
 // ----------------------------------------------------------------------------
 
 // Set the Value from a Boolean
-void Config::Value::set(const Config::Boolean b) {
+void TOML::Value::set(const TOML::Boolean b) {
     clear();
     value_as_boolean = b;
     is_conformable_to_boolean = true;
@@ -488,75 +492,75 @@ void Config::Value::set(const Config::Boolean b) {
 // ----------------------------------------------------------------------------
 
 // Return the Value as a String
-Config::String Config::Value::as_string() const {
+TOML::String TOML::Value::as_string() const {
     if (is_conformable_to_string) {
         return value_as_string;
     } else {
-        throw Config::TypeError("Value cannot be converted to a string.");
+        throw TOML::TypeError("Value cannot be converted to a string.");
     }
 }
 
 // ----------------------------------------------------------------------------
 
 // Return the Value as an Integer
-Config::Integer Config::Value::as_integer() const {
+TOML::Integer TOML::Value::as_integer() const {
     if (is_conformable_to_integer) {
         return value_as_integer;
     } else {
-        throw Config::TypeError("Value cannot be converted to an integer.");
+        throw TOML::TypeError("Value cannot be converted to an integer.");
     }
 }
 
 // ----------------------------------------------------------------------------
 
 // Return the Value as a Float
-Config::Float Config::Value::as_float() const {
+TOML::Float TOML::Value::as_float() const {
     if (is_conformable_to_float) {
         return value_as_float;
     } else {
-        throw Config::TypeError("Value cannot be converted to an integer.");
+        throw TOML::TypeError("Value cannot be converted to an integer.");
     }
 }
 
 // ----------------------------------------------------------------------------
 
 // Return the Value as a Boolean
-Config::Boolean Config::Value::as_boolean() const {
+TOML::Boolean TOML::Value::as_boolean() const {
     if (is_conformable_to_boolean) {
         return value_as_boolean;
     } else {
-        throw Config::TypeError("Value cannot be converted to an boolean.");
+        throw TOML::TypeError("Value cannot be converted to an boolean.");
     }
 }
 
 // ----------------------------------------------------------------------------
 
-bool Config::Value::is_valid_string() const {
+bool TOML::Value::is_valid_string() const {
     return is_conformable_to_string;
 }
 
 // ----------------------------------------------------------------------------
 
-bool Config::Value::is_valid_integer() const {
+bool TOML::Value::is_valid_integer() const {
     return is_conformable_to_integer;
 }
 
 // ----------------------------------------------------------------------------
 
-bool Config::Value::is_valid_float() const {
+bool TOML::Value::is_valid_float() const {
     return is_conformable_to_float;
 }
 
 // ----------------------------------------------------------------------------
 
-bool Config::Value::is_valid_boolean() const {
+bool TOML::Value::is_valid_boolean() const {
     return is_conformable_to_boolean;
 }
 
 // ----------------------------------------------------------------------------
 
-// Convert the Value to a std::string as if writing a new config file
-std::string Config::Value::serialize() const {
+// Convert the Value to a std::string as if writing a new TOML file
+std::string TOML::Value::serialize() const {
     if (is_conformable_to_boolean) {
         // Write as a Boolean
         if (value_as_boolean) {
@@ -604,14 +608,14 @@ std::string Config::Value::serialize() const {
         return output;
     } else {
         // Not actually a valid Value
-        throw Config::ValueError("Value cannot be serialized.");
+        throw TOML::ValueError("Value cannot be serialized.");
     }
 }
 
 // ----------------------------------------------------------------------------
 
 // Write a Value to a stream
-std::ostream& Config::operator<< (std::ostream& sout, const Config::Value& v) {
+std::ostream& TOML::operator<< (std::ostream& sout, const TOML::Value& v) {
     sout << v.serialize();
     return sout;
 }
@@ -619,7 +623,7 @@ std::ostream& Config::operator<< (std::ostream& sout, const Config::Value& v) {
 // ============================================================================
 // ValueArray _________________________________________________________________
 
-Config::ValueArray::ValueArray():
+TOML::ValueArray::ValueArray():
     is_conformable_to_string(false),
     is_conformable_to_integer(false),
     is_conformable_to_float(false),
@@ -628,13 +632,13 @@ Config::ValueArray::ValueArray():
 
 // ----------------------------------------------------------------------------
 
-unsigned Config::ValueArray::size() const {
+unsigned TOML::ValueArray::size() const {
     return array.size();
 }
 
 // ----------------------------------------------------------------------------
 
-void Config::ValueArray::add(const Value v) {
+void TOML::ValueArray::add(const Value v) {
     if (array.empty()) {
         array.push_back(v);
         is_conformable_to_string = v.is_valid_string();
@@ -653,7 +657,7 @@ void Config::ValueArray::add(const Value v) {
         } else if (is_conformable_to_boolean && v.is_valid_boolean()) {
             array.push_back(v);
         } else {
-            throw Config::ValueError(
+            throw TOML::ValueError(
                     "Value with invalid type cannot be added to ValueArray.");
         }
     }
@@ -661,7 +665,7 @@ void Config::ValueArray::add(const Value v) {
 
 // ----------------------------------------------------------------------------
 
-void Config::ValueArray::remove(const unsigned index) {
+void TOML::ValueArray::remove(const unsigned index) {
     if (index >= array.size()) {
         throw std::out_of_range("Out-of-range index in ValueArray.");
     }
@@ -670,75 +674,75 @@ void Config::ValueArray::remove(const unsigned index) {
 
 // ----------------------------------------------------------------------------
 
-void Config::ValueArray::clear() {
+void TOML::ValueArray::clear() {
     array.clear();
 }
 
 // ----------------------------------------------------------------------------
 
-Config::Value Config::ValueArray::at(const unsigned index) const {
+TOML::Value TOML::ValueArray::at(const unsigned index) const {
     return array.at(index);
 }
 
 // ----------------------------------------------------------------------------
 
-std::vector<Config::String> Config::ValueArray::as_string() const {
+std::vector<TOML::String> TOML::ValueArray::as_string() const {
     if (is_conformable_to_string) {
-        std::vector<Config::String> v;
+        std::vector<TOML::String> v;
         for (auto it = array.begin(); it != array.end(); it++) {
             v.push_back(it->as_string());
         }
         return v;
     } else {
-        throw Config::TypeError("ValueArray cannot be converted to strings.");
+        throw TOML::TypeError("ValueArray cannot be converted to strings.");
     }
 }
 
 // ----------------------------------------------------------------------------
 
-std::vector<Config::Integer> Config::ValueArray::as_integer() const {
+std::vector<TOML::Integer> TOML::ValueArray::as_integer() const {
     if (is_conformable_to_integer) {
-        std::vector<Config::Integer> v;
+        std::vector<TOML::Integer> v;
         for (auto it = array.begin(); it != array.end(); it++) {
             v.push_back(it->as_integer());
         }
         return v;
     } else {
-        throw Config::TypeError("ValueArray cannot be converted to integers.");
+        throw TOML::TypeError("ValueArray cannot be converted to integers.");
     }
 }
 
 // ----------------------------------------------------------------------------
 
-std::vector<Config::Float> Config::ValueArray::as_float() const {
+std::vector<TOML::Float> TOML::ValueArray::as_float() const {
     if (is_conformable_to_float) {
-        std::vector<Config::Float> v;
+        std::vector<TOML::Float> v;
         for (auto it = array.begin(); it != array.end(); it++) {
             v.push_back(it->as_float());
         }
         return v;
     } else {
-        throw Config::TypeError("ValueArray cannot be converted to floats.");
+        throw TOML::TypeError("ValueArray cannot be converted to floats.");
     }
 }
 
 // ----------------------------------------------------------------------------
 
-std::vector<Config::Boolean> Config::ValueArray::as_boolean() const {
+std::vector<TOML::Boolean> TOML::ValueArray::as_boolean() const {
     if (is_conformable_to_boolean) {
-        std::vector<Config::Boolean> v;
+        std::vector<TOML::Boolean> v;
         for (auto it = array.begin(); it != array.end(); it++) {
             v.push_back(it->as_boolean());
         }
         return v;
     } else {
-        throw Config::TypeError("ValueArray cannot be converted to booleans.");
+        throw TOML::TypeError("ValueArray cannot be converted to booleans.");
     }
 }
 
 // ----------------------------------------------------------------------------
 
-std::string Config::ValueArray::serialize() const {
+std::string TOML::ValueArray::serialize() const {
     std::stringstream ss("");
     ss << "[";
     if (!array.empty()) {
@@ -756,8 +760,8 @@ std::string Config::ValueArray::serialize() const {
 // ----------------------------------------------------------------------------
 
 // Write a ValueArray to a stream
-std::ostream& Config::operator<< (
-        std::ostream& sout, const Config::ValueArray& va) {
+std::ostream& TOML::operator<< (
+        std::ostream& sout, const TOML::ValueArray& va) {
     sout << va.serialize();
     return sout;
 }
@@ -767,7 +771,7 @@ std::ostream& Config::operator<< (
 
 // Parse a Table from an input string
 // -- This is a convenience method that wraps parse_stream
-void Config::Table::parse_string(const std::string s) {
+void TOML::Table::parse_string(const std::string s) {
     // Load into a stringstream and parse that stream
     std::istringstream iss(s);
     parse_stream(iss);
@@ -777,7 +781,7 @@ void Config::Table::parse_string(const std::string s) {
 
 // Parse a Table from a file (specified by the file name)
 // -- This is a convenience method that wraps parse_stream
-void Config::Table::parse_file(const std::string filename) {
+void TOML::Table::parse_file(const std::string filename) {
     // Open the file as a filestream and parse that stream
     std::ifstream fin;
     fin.open(filename);
@@ -789,7 +793,7 @@ void Config::Table::parse_file(const std::string filename) {
 
 // Parse a Table from a stream.  A failure results in a ParseError, and clears
 // the Table.
-void Config::Table::parse_stream(std::istream& sin) {
+void TOML::Table::parse_stream(std::istream& sin) {
     clear();
     Table* current_table = this;
     std::string line;
@@ -844,17 +848,17 @@ void Config::Table::parse_stream(std::istream& sin) {
                 consume_whitespace(it, end);
                 if (*it == '[') {
                     // This is a ValueArray
-                    Config::ValueArray va;
+                    TOML::ValueArray va;
                     consume_character('[', it, end);
                     consume_whitespace(it, end);
                     while (*it != ']') {
-                        va.add(Config::Value(it, end));
+                        va.add(TOML::Value(it, end));
                         consume_whitespace(it, end);
                         if (*it == ',') {
                             consume_character(',', it, end);
                             consume_whitespace(it, end);
                         } else if (*it != ']') {
-                            throw Config::ParseError(
+                            throw TOML::ParseError(
                                     "Malformed array of values.");
                         }
                     }
@@ -863,13 +867,13 @@ void Config::Table::parse_stream(std::istream& sin) {
                     current_table->add(key, va);
                 } else {
                     // This is a Value
-                    Config::Value v(it, end);
+                    TOML::Value v(it, end);
                     consume_to_eol(it, end);
                     current_table->add(key, v);
                 }
             }
         }
-    } catch (Config::ParseError& pe) {
+    } catch (TOML::ParseError& pe) {
         clear();
         throw;
     }
@@ -877,12 +881,12 @@ void Config::Table::parse_stream(std::istream& sin) {
 
 // ----------------------------------------------------------------------------
 
-bool Config::Table::valid_key(const std::string key) {
+bool TOML::Table::valid_key(const std::string key) {
     string_it it = key.begin();
     const string_it end = key.end();
     try {
         analyze_key(it, end);
-    } catch(Config::ParseError& pe) {
+    } catch(TOML::ParseError& pe) {
         return false;
     }
     if (it == end) {
@@ -895,12 +899,12 @@ bool Config::Table::valid_key(const std::string key) {
 // ----------------------------------------------------------------------------
 
 // Add a Value to the Table
-void Config::Table::add(const std::string key, const Value& v) {
+void TOML::Table::add(const std::string key, const Value& v) {
     if (scalar_map.find(key) != scalar_map.end()) {
-        throw Config::TableError("Key \"" + key + "\" already exists.");
+        throw TOML::TableError("Key \"" + key + "\" already exists.");
     }
     if (!valid_key(key)) {
-        throw Config::TableError("Key \"" + key + "\" is invalid.");
+        throw TOML::TableError("Key \"" + key + "\" is invalid.");
     }
     scalar_map[key] = v;
 }
@@ -908,12 +912,12 @@ void Config::Table::add(const std::string key, const Value& v) {
 // ----------------------------------------------------------------------------
 
 // Add a ValueArray to the Table
-void Config::Table::add(const std::string key, const ValueArray& va) {
+void TOML::Table::add(const std::string key, const ValueArray& va) {
     if (array_map.find(key) != array_map.end()) {
-        throw Config::TableError("Key \"" + key + "\" already exists.");
+        throw TOML::TableError("Key \"" + key + "\" already exists.");
     }
     if (!valid_key(key)) {
-        throw Config::TableError("Key \"" + key + "\" is invalid.");
+        throw TOML::TableError("Key \"" + key + "\" is invalid.");
     }
     array_map[key] = va;
 }
@@ -921,15 +925,15 @@ void Config::Table::add(const std::string key, const ValueArray& va) {
 // ----------------------------------------------------------------------------
 
 // Add a sub-Table to the Table
-void Config::Table::add(const std::string key, const Table& t) {
+void TOML::Table::add(const std::string key, const Table& t) {
     if (this == &t) {
-        throw Config::TableError("Cannot have recursive tables.");
+        throw TOML::TableError("Cannot have recursive tables.");
     }
     if (table_map.find(key) != table_map.end()) {
-        throw Config::TableError("Key \"" + key + "\" already exists.");
+        throw TOML::TableError("Key \"" + key + "\" already exists.");
     }
     if (!valid_key(key)) {
-        throw Config::TableError("Key \"" + key + "\" is invalid.");
+        throw TOML::TableError("Key \"" + key + "\" is invalid.");
     }
     table_map[key] = t;
 }
@@ -937,7 +941,7 @@ void Config::Table::add(const std::string key, const Table& t) {
 // ----------------------------------------------------------------------------
 
 // Return the set of all keys in the Table
-std::vector<std::string> Config::Table::all_keys() const {
+std::vector<std::string> TOML::Table::all_keys() const {
     std::vector<std::string> v;
     for (auto it = scalar_map.begin(); it != scalar_map.end(); it++) {
         v.push_back(it->first);
@@ -951,7 +955,7 @@ std::vector<std::string> Config::Table::all_keys() const {
 // ----------------------------------------------------------------------------
 
 // Return the set of keys to scalars in the Table
-std::vector<std::string> Config::Table::scalar_keys() const {
+std::vector<std::string> TOML::Table::scalar_keys() const {
     std::vector<std::string> v;
     for (auto it = scalar_map.begin(); it != scalar_map.end(); it++) {
         v.push_back(it->first);
@@ -962,7 +966,7 @@ std::vector<std::string> Config::Table::scalar_keys() const {
 // ----------------------------------------------------------------------------
 
 // Return the set of keys to arrays in the Table
-std::vector<std::string> Config::Table::array_keys() const {
+std::vector<std::string> TOML::Table::array_keys() const {
     std::vector<std::string> v;
     for (auto it = array_map.begin(); it != array_map.end(); it++) {
         v.push_back(it->first);
@@ -973,7 +977,7 @@ std::vector<std::string> Config::Table::array_keys() const {
 // ----------------------------------------------------------------------------
 
 // Return the set of keys to tables in the Table
-std::vector<std::string> Config::Table::table_keys() const {
+std::vector<std::string> TOML::Table::table_keys() const {
     std::vector<std::string> v;
     for (auto it = table_map.begin(); it != table_map.end(); it++) {
         v.push_back(it->first);
@@ -984,35 +988,35 @@ std::vector<std::string> Config::Table::table_keys() const {
 // ----------------------------------------------------------------------------
 
 // Does the Table have an element with this key?
-bool Config::Table::has(const std::string key) const {
+bool TOML::Table::has(const std::string key) const {
     return (has_scalar(key) || has_array(key) || has_table(key));
 }
 
 // ----------------------------------------------------------------------------
 
 // Does the Table have a scalar Value with this key?
-bool Config::Table::has_scalar(const std::string key) const {
+bool TOML::Table::has_scalar(const std::string key) const {
     return (scalar_map.find(key) != scalar_map.end());
 }
 
 // ----------------------------------------------------------------------------
 
 // Does the Table have a ValueArray with this key?
-bool Config::Table::has_array(const std::string key) const {
+bool TOML::Table::has_array(const std::string key) const {
     return (array_map.find(key) != array_map.end());
 }
 
 // ----------------------------------------------------------------------------
 
 // Does the Table have a Table with this key?
-bool Config::Table::has_table(const std::string key) const {
+bool TOML::Table::has_table(const std::string key) const {
     return (table_map.find(key) != table_map.end());
 }
 
 // ----------------------------------------------------------------------------
 
 // Does the Table have an element with this path?
-bool Config::Table::has(const std::vector<std::string> path) const {
+bool TOML::Table::has(const std::vector<std::string> path) const {
     const Table* current_table = this;
     for (unsigned index = 0; index < path.size(); index++) {
         if (current_table->has(path[index])) {
@@ -1029,28 +1033,28 @@ bool Config::Table::has(const std::vector<std::string> path) const {
 // ----------------------------------------------------------------------------
 
 // Access a Value according to its key within the Table
-Config::Value& Config::Table::get_scalar(const std::string key) {
+TOML::Value& TOML::Table::get_scalar(const std::string key) {
     return scalar_map.at(key);
 }
 
 // ----------------------------------------------------------------------------
 
 // Access a ValueArray according to its key within the Table
-Config::ValueArray& Config::Table::get_array(const std::string key) {
+TOML::ValueArray& TOML::Table::get_array(const std::string key) {
     return array_map.at(key);
 }
 
 // ----------------------------------------------------------------------------
 
 // Access a Table according to its key within the Table
-Config::Table& Config::Table::get_table(const std::string key) {
+TOML::Table& TOML::Table::get_table(const std::string key) {
     return table_map.at(key);
 }
 
 // ----------------------------------------------------------------------------
 
 // Access a Table according to its key within the Table (const version)
-const Config::Table& Config::Table::get_table(const std::string key) const {
+const TOML::Table& TOML::Table::get_table(const std::string key) const {
     return table_map.at(key);
 }
 
@@ -1058,7 +1062,7 @@ const Config::Table& Config::Table::get_table(const std::string key) const {
 
 // Find a subtable from a path.  The create flag specifies whether or not to
 // create table if missing (including intermediate tables).
-Config::Table& Config::Table::get_table(
+TOML::Table& TOML::Table::get_table(
         const std::vector<std::string> path, const bool create) {
     Table* current_table = this;
     for (auto it = path.begin(); it != path.end(); it++) {
@@ -1075,7 +1079,7 @@ Config::Table& Config::Table::get_table(
 // ----------------------------------------------------------------------------
 
 // Find a subtable from a path.  This is the const version.
-const Config::Table& Config::Table::get_table(
+const TOML::Table& TOML::Table::get_table(
         const std::vector<std::string> path) const {
     const Table* current_table = this;
     for (auto it = path.begin(); it != path.end(); it++) {
@@ -1087,7 +1091,7 @@ const Config::Table& Config::Table::get_table(
 // ----------------------------------------------------------------------------
 
 // Clear the Table
-void Config::Table::clear() {
+void TOML::Table::clear() {
     scalar_map.clear();
     array_map.clear();
     table_map.clear();
@@ -1095,8 +1099,8 @@ void Config::Table::clear() {
 
 // ----------------------------------------------------------------------------
 
-// Convert the Table to a std::string as if writing a new config file
-std::string Config::Table::serialize(unsigned indent_level) const {
+// Convert the Table to a std::string as if writing a new TOML file
+std::string TOML::Table::serialize(unsigned indent_level) const {
     std::string indent("");
     for (unsigned i = 0; i < indent_level; i++) {
         indent += "    ";
@@ -1118,7 +1122,7 @@ std::string Config::Table::serialize(unsigned indent_level) const {
 // ----------------------------------------------------------------------------
 
 // Write a Table to a stream
-std::ostream& Config::operator<< (std::ostream& sout, const Config::Table& t) {
+std::ostream& TOML::operator<< (std::ostream& sout, const TOML::Table& t) {
     sout << t.serialize();
     return sout;
 }

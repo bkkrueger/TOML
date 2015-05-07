@@ -2,22 +2,22 @@
 #include <iostream>
 #include <fstream>
 
-#include "config.h"
+#include "toml.h"
 
-void print_value_summary(const Config::Value v) {
+void print_value_summary(const TOML::Value v) {
     std::cout << "Summary of value:" << std::endl;
     try {
         std::string v_string = v.as_string();
         std::cout << "    Value as a string = [" << v_string << "]"
             << std::endl;
-    } catch(Config::TypeError& te) {
+    } catch(TOML::TypeError& te) {
         std::cout << "    Value is not conformable to a string." << std::endl;
     }
     try {
         int64_t v_integer = v.as_integer();
         std::cout << "    Value as an integer = [" << v_integer << "]"
             << std::endl;
-    } catch(Config::TypeError& te) {
+    } catch(TOML::TypeError& te) {
         std::cout << "    Value is not conformable to an integer."
             << std::endl;
     }
@@ -25,7 +25,7 @@ void print_value_summary(const Config::Value v) {
         double v_float = v.as_float();
         std::cout << std::setprecision(9);
         std::cout << "    Value as a float = [" << v_float << "]" << std::endl;
-    } catch(Config::TypeError& te) {
+    } catch(TOML::TypeError& te) {
         std::cout << "    Value is not conformable to a float." << std::endl;
     }
     try {
@@ -33,20 +33,20 @@ void print_value_summary(const Config::Value v) {
         std::cout << std::boolalpha;
         std::cout << "    Value as a boolean = [" << v_boolean << "]"
             << std::endl;
-    } catch(Config::TypeError& te) {
+    } catch(TOML::TypeError& te) {
         std::cout << "    Value is not conformable to a boolean." << std::endl;
     }
 }
 
 // ============================================================================
 
-void try_to_set(Config::Value& v, const std::string s) {
+void try_to_set(TOML::Value& v, const std::string s) {
     try {
         std::cout << "Set value to [" << s << "]." << std::endl;
         v.set_from_string(s);
         print_value_summary(v);
         std::cout << "    serialize as [" << v.serialize() << "]" << std::endl;
-    } catch(Config::ParseError& pe) {
+    } catch(TOML::ParseError& pe) {
         std::cout << "Could not compute valid Value from [" << s << "]: "
             << std::endl;
         std::cout << "    " << pe.what() << std::endl;
@@ -56,7 +56,7 @@ void try_to_set(Config::Value& v, const std::string s) {
 // ============================================================================
 
 int main(int argc, char *argv[]) {
-    Config::Value v;
+    TOML::Value v;
     print_value_summary(v);
 
     try_to_set(v, "yes");
@@ -82,7 +82,7 @@ int main(int argc, char *argv[]) {
     std::string file = "yes = \"yes\" # YES\nno=0\nmaybe    =0.5\nwhat=\"\\\"what\\nare\\byou\\ttalking\\nabout?\\\"\"";
     std::cout << std::endl;
     std::cout << "Parse [" << file << "]" << std::endl;
-    Config::Table table;
+    TOML::Table table;
     table.parse_string(file);
     std::cout << table;
     std::cout << "what (as a string) --> "
@@ -93,7 +93,7 @@ int main(int argc, char *argv[]) {
         std::cout << "key \"who\" does not exist" << std::endl;
     }
 
-    file = "parameters.config";
+    file = "parameters.toml";
     std::cout << std::endl;
     std::cout << "Parse file \"" << file << "\"" << std::endl;
     table.parse_file(file);
@@ -113,17 +113,17 @@ int main(int argc, char *argv[]) {
     try {
         table.add("string_var", v);
         std::cout << " !! Added redundant value." << std::endl;
-    } catch (Config::TableError& te) {
+    } catch (TOML::TableError& te) {
         std::cout << "    Failed to add redundant value." << std::endl;
     }
     try {
         table.add("string var", v);
         std::cout << " !! Added value with invalid key." << std::endl;
-    } catch (Config::TableError& te) {
+    } catch (TOML::TableError& te) {
         std::cout << "    Failed to add value with invalid." << std::endl;
     }
-    Config::Table table2;
-    v.set(static_cast<Config::Integer>(42));
+    TOML::Table table2;
+    v.set(static_cast<TOML::Integer>(42));
     table2.add("integer", v);
     v.set(3.14);
     table2.add("float", v);
@@ -131,7 +131,7 @@ int main(int argc, char *argv[]) {
     try {
         table.add("recursion", table);
         std::cout << " !! Added recursive table." << std::endl;
-    } catch (Config::TableError& te) {
+    } catch (TOML::TableError& te) {
         std::cout << "    Failed to add recursive table." << std::endl;
     }
     std::cout << table.serialize(2);
