@@ -598,7 +598,7 @@ std::string TOML::Value::serialize() const {
             } else if (*it == '\f') {
                 output.append("\\f");
             } else if (*it == '\r') {
-                output.append("\\f");
+                output.append("\\r");
             } else {
                 output.append(1, *it);
             }
