@@ -1034,6 +1034,12 @@ bool TOML::Table::has(const std::vector<std::string> path) const {
 
 // Access a Value according to its key within the Table
 TOML::Value& TOML::Table::get_scalar(const std::string key) {
+    if (scalar_map.find(key) == scalar_map.end()) {
+        std::string message = "No scalar at key \"";
+        message.append(key);
+        message.append("\".");
+        throw TOML::TableError(message);
+    }
     return scalar_map.at(key);
 }
 
@@ -1041,6 +1047,12 @@ TOML::Value& TOML::Table::get_scalar(const std::string key) {
 
 // Access a ValueArray according to its key within the Table
 TOML::ValueArray& TOML::Table::get_array(const std::string key) {
+    if (array_map.find(key) == array_map.end()) {
+        std::string message = "No array at key \"";
+        message.append(key);
+        message.append("\".");
+        throw TOML::TableError(message);
+    }
     return array_map.at(key);
 }
 
@@ -1048,6 +1060,12 @@ TOML::ValueArray& TOML::Table::get_array(const std::string key) {
 
 // Access a Table according to its key within the Table
 TOML::Table& TOML::Table::get_table(const std::string key) {
+    if (table_map.find(key) == table_map.end()) {
+        std::string message = "No table at key \"";
+        message.append(key);
+        message.append("\".");
+        throw TOML::TableError(message);
+    }
     return table_map.at(key);
 }
 
@@ -1055,6 +1073,12 @@ TOML::Table& TOML::Table::get_table(const std::string key) {
 
 // Access a Table according to its key within the Table (const version)
 const TOML::Table& TOML::Table::get_table(const std::string key) const {
+    if (table_map.find(key) == table_map.end()) {
+        std::string message = "No table at key \"";
+        message.append(key);
+        message.append("\".");
+        throw TOML::TableError(message);
+    }
     return table_map.at(key);
 }
 

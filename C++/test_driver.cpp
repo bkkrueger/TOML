@@ -89,7 +89,7 @@ int main(int argc, char *argv[]) {
         << table.get_scalar("what").as_string() << std::endl;
     try {
         std::cout << "who --> " << table.get_scalar("who") << std::endl;
-    } catch (std::out_of_range& err) {
+    } catch (TOML::TableError& err) {
         std::cout << "key \"who\" does not exist" << std::endl;
     }
 
