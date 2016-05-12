@@ -12,7 +12,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
-#include <unordered_map>
+#include <boost/container/flat_map.hpp>
 #include <vector>
 
 namespace TOML {
@@ -204,12 +204,39 @@ namespace TOML {
             // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
             // Internal storage
 
+            // Note:
+            //     Originally this was developed using
+            // std::unordered_map<std::string,Table>, which is fine in clang++
+            // but fails in g++.  This is known as a recursive data type, with
+            // Table having a container of Tables.  However the STL is not
+            // required to accept incomplete types as templates (Table is an
+            // incomplete type at that point because it has not been fully
+            // created when I ask for a map that contains Tables), because that
+            // can potentially cause problems in some cases.  It turns out that
+            // clang++ is able to determine that Table is a recursive type and
+            // manages to compile, while g++ does not allow this because it is
+            // not part of the standard.  The Boost containers package is
+            // designed so that most of its containers can be templated with
+            // incomplete types in order to support recursive types.  Changing
+            // from an unordered_map to a flat_map means I'm not using a
+            // variation on an ordered map, but that's fine.  I don't expect
+            // sorting to matter, or for the performance differences between
+            // flat_map and map to matter, because of the small size of most
+            // TOML files.
+            //     If you don't want to use the Boost libraries (there are
+            // reasons for avoiding libraries at times), you could alternately
+            // use a std::unordered_map<std::string,Table*>, because then you
+            // have pointers (probably a smart pointer is better than a bare
+            // pointer, but I'll leave that to you).  But then you have to go
+            // through the logic, switch things to use pointers, and make sure
+            // you don't introduce memory leaks.  I was too lazy to that yet.
+
             // The map for (key, value) pairs
-            std::unordered_map<std::string,Value> scalar_map;
+            boost::container::flat_map<std::string,Value> scalar_map;
             // The map for (key, value array) pairs
-            std::unordered_map<std::string,ValueArray> array_map;
+            boost::container::flat_map<std::string,ValueArray> array_map;
             // The map for (key, table) pairs
-            std::unordered_map<std::string,Table> table_map;
+            boost::container::flat_map<std::string,Table> table_map;
 
         public:
             // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
